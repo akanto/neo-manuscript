@@ -1,0 +1,38 @@
+\documentclass[11pt]{article}
+\usepackage{amsmath,amssymb}
+\usepackage[hidelinks]{hyperref}
+
+\title{Warm-up Matters: Stabilising Small Transformers}
+\author{Ada Lovelace}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+A short learning-rate warm-up removes almost every divergent run when training small transformers, at no cost in final perplexity.
+\end{abstract}
+
+\section{Introduction}
+
+Transformers (Vaswani et al. 2017) are known to train unstably when the learning rate starts high.
+We ask how much warm-up a small model needs, and whether its shape matters.
+
+\section{Method}
+
+learning rate at step t: eta_t = eta_max * min(1, t/T_w), T_w = warm-up length
+
+loss: L(theta) = -1/N sum_i log p(y_i | x_i) + lambda ||theta||^2
+
+\section{Results}
+
+WikiText-103, 5 seeds each:
+none: ppl 31.8, 3/5 diverged
+linear 1k: ppl 24.6, 0/5 diverged
+linear 4k: ppl 24.1, 0/5 diverged
+cosine 4k: ppl 24.3, 0/5 diverged
+
+\section{Conclusion}
+
+
+\end{document}

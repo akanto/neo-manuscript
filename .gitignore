@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.latex-build/
+video/out/
+.hutch/
+build/
+artifacts/
+.cottontail-tmp/
+.DS_Store

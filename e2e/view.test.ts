@@ -1,0 +1,262 @@
+/**
+ * The view in Chrome, around the harness's stand-in for Mirador: what Visual mode draws, that typing reaches the file,
+ * that the agent's changes merge with the user's typing, and that a build shows its PDF and its errors.
+ * Runs with the Chrome installed on the machine (playwright-core downloads no browser); skipped without one.
+ */
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { chromium, webkit, type Browser, type FrameLocator, type Page } from "playwright-core";
+import { searchPath } from "../core/compile.ts";
+import { MIRADOR_CANVAS, startHarness, type Harness } from "./harness.ts";
+
+const repo = join(import.meta.dir, "..");
+const chrome = process.platform === "darwin" ? "/Applications/Google Chrome.app" : "/usr/bin/google-chrome";
+const haveTex = ["latexmk", "pdflatex", "tectonic"].some((command) => Bun.which(command, { PATH: searchPath() }));
+const built = existsSync(join(repo, "dist", "view.js")) && haveTex;
+const haveWebKit = existsSync(webkit.executablePath());
+
+/**
+ * Twice: in Chrome as a plain page, and in WebKit (the engine of Mirador's app) framed as Mirador frames it, with its
+ * sandbox, Content-Security-Policy and bridge, where every error the frame reports fails the run.
+ */
+const setups = [
+  { name: "in Chrome", run: existsSync(chrome) && built, launch: () => chromium.launch({ channel: "chrome" }), mirador: false },
+  { name: "in WebKit, framed as Mirador frames it", run: haveWebKit && existsSync(MIRADOR_CANVAS) && built, launch: () => webkit.launch(), mirador: true },
+];
+
+for (const setup of setups) describe.skipIf(!setup.run)(`the view ${setup.name}`, () => {
+  let harness: Harness;
+  let browser: Browser;
+  let page: Page;
+  let root: Page | FrameLocator;
+  const errors: string[] = [];
+
+  beforeAll(async () => {
+    harness = await startHarness(join(repo, "examples", "paper.tex"), { mirador: setup.mirador });
+    browser = await setup.launch();
+    page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (message) => message.text().startsWith("FRAME ERROR: ") && errors.push(message.text()));
+    await page.goto(harness.url);
+    root = setup.mirador ? page.frameLocator("iframe") : page;
+    await root.locator(".pdf-page canvas").first().waitFor({ timeout: 60_000 });
+    if (setup.mirador) {
+      // Scrollbars that take room, as on a Mac with a mouse: headless WebKit's float over the page and hide layout loops.
+      const frame = page.frames().find((candidate) => candidate !== page.mainFrame())!;
+      await frame.evaluate(() => {
+        const style = document.createElement("style");
+        style.textContent = "::-webkit-scrollbar { width: 15px; height: 15px; background: #ddd } ::-webkit-scrollbar-thumb { background: #999 }";
+        document.head.append(style);
+      });
+    }
+  }, 90_000);
+
+  afterAll(async () => {
+    await browser?.close();
+    harness?.stop();
+  });
+
+  // Mirador's ⌘ is the Mac's; WebKit on Playwright takes Meta as well.
+  const mod = "Meta";
+
+  const fileHas = async (text: string, within = 5000) => {
+    for (const started = Date.now(); Date.now() - started < within; await Bun.sleep(100)) if ((await harness.text()).includes(text)) return true;
+    return false;
+  };
+
+  test("Visual mode draws the document: preamble folded, numbered headings, math, resolved references", async () => {
+    await expect(root.locator(".cm-v-preamble").textContent()).resolves.toContain("Preamble · article");
+    await expect(root.locator(".cm-v-title").textContent()).resolves.toBe("A Small Example");
+    await expect(root.locator(".cm-v-h1").first().textContent()).resolves.toBe("1 Introduction");
+    expect(await root.locator(".cm-v-math .katex").count()).toBeGreaterThan(5);
+    await expect(root.locator(".cm-v-ref").first().textContent()).resolves.toBe("2");
+    await expect(root.locator(".cm-v-cite").textContent()).resolves.toBe("[1]");
+    await root.locator(".build-status", { hasText: /2 pages, 0 errors/ }).waitFor({ timeout: 30_000 });
+  }, 40_000);
+
+  test("clicking a formula shows its source to edit", async () => {
+    const before = await root.locator(".cm-v-math-source").count();
+    await root.locator(".cm-v-math").first().click();
+    expect(await root.locator(".cm-v-math-source").count()).toBeGreaterThan(before);
+  });
+
+  test("typing reaches the file", async () => {
+    await root.locator(".cm-line", { hasText: "links five constants" }).click();
+    await page.keyboard.press("End");
+    await page.keyboard.type(" Typed by the user.", { delay: 15 });
+    expect(await fileHas("links five constants. Typed by the user.")).toBe(true);
+  });
+
+  test("the agent's change merges with what the user is typing", async () => {
+    await page.keyboard.type(" More", { delay: 25 });
+    await harness.agentApply({ op: "replace", find: "A Small Example", with: "A Bigger Example" });
+    await page.keyboard.type(" words.", { delay: 25 });
+    expect(await fileHas("Typed by the user. More words.")).toBe(true);
+    expect(await harness.text()).toContain("A Bigger Example");
+    await expect(root.locator(".cm-v-title").textContent()).resolves.toBe("A Bigger Example");
+  });
+
+  test("⌘B makes the selection bold", async () => {
+    await page.keyboard.down("Shift");
+    for (let i = 0; i < 6; i++) await page.keyboard.press("ArrowLeft");
+    await page.keyboard.up("Shift");
+    await page.keyboard.press(`${mod}+b`);
+    expect(await fileHas("More \\textbf{words.}")).toBe(true);
+  });
+
+  test("a LaTeX error shows in the list with its line", async () => {
+    await page.keyboard.press("End");
+    await page.keyboard.type(" \\nosuchcommand", { delay: 10 });
+    await root.locator(".problems-toggle.has-errors").waitFor({ timeout: 60_000 });
+    await expect(root.locator(".problems").textContent()).resolves.toContain("line 26 Undefined control sequence");
+    expect(await root.locator(".cm-problem-error").count()).toBe(1);
+  }, 70_000);
+
+  test("the layout switch hides and shows the PDF, and the hidden PDF's errors show in the toolbar", async () => {
+    await root.getByRole("button", { name: "Editor", exact: true }).click();
+    expect(await root.locator(".preview-pane").isVisible()).toBe(false);
+    await expect(root.locator(".build-badge").textContent()).resolves.toBe("1 error");
+    await root.getByRole("button", { name: "PDF", exact: true }).click();
+    expect(await root.locator(".editor-pane").isVisible()).toBe(false);
+    expect(await root.locator(".pdf-page canvas").first().isVisible()).toBe(true);
+    await root.getByRole("button", { name: "Split", exact: true }).click();
+    expect(await root.locator(".editor-pane").isVisible()).toBe(true);
+    expect(await root.locator(".preview-pane").isVisible()).toBe(true);
+  });
+
+  test("Source mode shows the plain source with line numbers", async () => {
+    await root.getByRole("button", { name: "Source" }).click();
+    expect(await root.locator(".cm-source .cm-lineNumbers").count()).toBe(1);
+    expect(await root.locator(".cm-v-preamble").count()).toBe(0);
+    await root.getByRole("button", { name: "Visual" }).click();
+    expect(await root.locator(".cm-visual").count()).toBe(1);
+  });
+
+  test("resizing the panel, and hiding and showing the PDF, lays it out again without a ResizeObserver loop", async () => {
+    for (const width of [1200, 1013, 977, 860, 845, 790, 700, 620, 655, 900, 1400]) {
+      await page.setViewportSize({ width, height: 700 + (width % 7) * 10 });
+      await Bun.sleep(200);
+    }
+    for (let round = 0; round < 3; round++) {
+      await root.getByRole("button", { name: "Editor", exact: true }).click();
+      await Bun.sleep(150);
+      await root.getByRole("button", { name: "Split", exact: true }).click();
+      await Bun.sleep(300);
+    }
+    await page.setViewportSize({ width: 1400, height: 900 });
+  }, 30_000);
+
+  test("switching between the editor and the PDF keeps the place", async () => {
+    // A low panel, so the conclusion's paragraph can be scrolled to the top of the editor.
+    await page.setViewportSize({ width: 1400, height: 420 });
+    await root.getByRole("button", { name: "Editor", exact: true }).click();
+    const scroller = root.locator(".cm-scroller");
+    await scroller.evaluate((element) => (element.scrollTop = element.scrollHeight));
+    await Bun.sleep(100);
+    await scroller.evaluate((element) => {
+      const line = [...element.querySelectorAll(".cm-line")].find((candidate) => candidate.textContent?.includes("Gradient descent is simple"))!;
+      element.scrollTop += line.getBoundingClientRect().top - element.getBoundingClientRect().top;
+    });
+    await Bun.sleep(100);
+
+    // The paragraph is on the PDF's second page.
+    await root.getByRole("button", { name: "PDF", exact: true }).click();
+    const pageAtTop = () =>
+      root.locator(".pdf-scroll").evaluate((element) => {
+        const top = element.getBoundingClientRect().top + 16;
+        const pages = [...element.querySelectorAll<HTMLElement>(".pdf-page")];
+        return Number(pages.find((box) => box.getBoundingClientRect().bottom > top)?.dataset.page);
+      });
+    for (let tries = 0; tries < 20 && (await pageAtTop()) !== 2; tries++) await Bun.sleep(100);
+    expect(await pageAtTop()).toBe(2);
+
+    // Back from the top of the PDF to the top of the editor, where the abstract is.
+    await root.locator(".pdf-scroll").hover();
+    for (let i = 0; i < 10; i++) await page.mouse.wheel(0, -1000);
+    for (let tries = 0; tries < 20 && (await root.locator(".pdf-scroll").evaluate((element) => element.scrollTop)) > 0; tries++) await Bun.sleep(100);
+    await root.getByRole("button", { name: "Editor", exact: true }).click();
+    const abstractInSight = () =>
+      scroller.evaluate((element) => {
+        const line = [...element.querySelectorAll(".cm-line")].find((candidate) => candidate.textContent?.includes("This document shows what"));
+        const box = element.getBoundingClientRect();
+        const top = line?.getBoundingClientRect().top ?? -1;
+        return top >= box.top && top < box.bottom;
+      });
+    for (let tries = 0; tries < 20 && !(await abstractInSight()); tries++) await Bun.sleep(100);
+    expect(await abstractInSight()).toBe(true);
+
+    await root.getByRole("button", { name: "Split", exact: true }).click();
+    await page.setViewportSize({ width: 1400, height: 900 });
+  }, 30_000);
+
+  /** Selects a word of the editor as a mouse would, through the DOM selection that CodeMirror reads. */
+  const selectWord = (word: string) => {
+    const frame = setup.mirador ? page.frames().find((candidate) => candidate !== page.mainFrame())! : page.mainFrame();
+    return frame.evaluate((word) => {
+      const walker = document.createTreeWalker(document.querySelector(".cm-content")!, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const at = node.textContent!.search(new RegExp(`\\b${word}\\b`));
+        if (at < 0) continue;
+        const range = document.createRange();
+        range.setStart(node, at);
+        range.setEnd(node, at + word.length);
+        getSelection()!.removeAllRanges();
+        getSelection()!.addRange(range);
+        return true;
+      }
+      return false;
+    }, word);
+  };
+
+  test("selecting a word shows its synonyms, and one takes its place in the same form", async () => {
+    await root.locator(".cm-line", { hasText: "grows fastest" }).click();
+    expect(await selectWord("grows")).toBe(true);
+    await root.locator(".syn-panel .syn-word").first().waitFor({ timeout: 10_000 });
+    await root.locator(".syn-word", { hasText: /^increases$/ }).first().click();
+    expect(await fileHas("where $f$ increases fastest")).toBe(true);
+    expect(await root.locator(".syn-panel").count()).toBe(0);
+  });
+
+  test("Escape closes the synonyms, and Ask sends the word and its sentence to the agent", async () => {
+    expect(await selectWord("points")).toBe(true);
+    await root.locator(".syn-panel .syn-word").first().waitFor({ timeout: 10_000 });
+    await page.keyboard.press("Escape");
+    expect(await root.locator(".syn-panel").count()).toBe(0);
+    expect(await selectWord("smooth")).toBe(true);
+    await root.locator(".syn-ask").click();
+    const prompts = await page.evaluate(() => (window as unknown as { __prompts: string[] }).__prompts);
+    expect(prompts.at(-1)).toContain("Suggest alternatives for “smooth” on line");
+    expect(prompts.at(-1)).toContain("be a smooth function.");
+  });
+
+  test("text selected in the PDF can be copied, and Ask asks about it with its source lines", async () => {
+    const span = root.locator(".textLayer span", { hasText: "Euler" }).first();
+    await span.waitFor({ timeout: 10_000 });
+    const box = (await span.boundingBox())!;
+    await page.mouse.move(box.x + 1, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 5 });
+    await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, { steps: 5 });
+    await page.mouse.up();
+    const selected = await root.locator(".pdf-scroll").evaluate(() => getSelection()?.toString() ?? "");
+    expect(selected).toContain("Euler");
+
+    await root.locator(".ask-toggle").click();
+    await expect(root.locator(".ask input").getAttribute("placeholder")).resolves.toContain("selected in the PDF");
+    await root.locator(".ask input").fill("Is this identity right?");
+    await root.locator(".ask input").press("Enter");
+    let prompts: string[] = [];
+    for (let tries = 0; tries < 20 && prompts.length === 0; tries++, await Bun.sleep(100)) prompts = await page.evaluate(() => (window as unknown as { __prompts: string[] }).__prompts);
+    const asked = prompts.at(-1)!;
+    expect(asked).toStartWith("Is this identity right?\n\n(About this text on page 1 of the PDF:)\n> ");
+    expect(asked).toContain("Euler");
+    // The line of the PDF begins with the end of source line 25 and goes on with line 26.
+    expect(asked).toContain("(It comes from lines 25–26 of the source:)\n```latex\n");
+    expect(asked).toContain("fastest --- a fact we use in Section~\\ref{sec:method}.\nEuler's identity, $e^{i\\pi} + 1 = 0$");
+  }, 30_000);
+
+  test("nothing threw", () => {
+    expect(errors).toEqual([]);
+  });
+});

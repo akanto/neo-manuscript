@@ -1,0 +1,65 @@
+\documentclass[11pt]{article}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage[hidelinks]{hyperref}
+
+\newcommand{\R}{\mathbb{R}}
+\DeclareMathOperator{\tr}{tr}
+
+\title{A Small Example}
+\author{Ada Lovelace}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This document shows what the \LaTeX{} editor draws in its Visual mode: headings, \textbf{bold}, \emph{emphasis},
+\texttt{code}, math, lists, references and a figure.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:intro}
+
+Let $f\colon \R^n \to \R$ be a smooth function. Its gradient $\nabla f$ points
+where $f$ grows fastest --- a fact we use in Section~\ref{sec:method}.
+Euler's identity, $e^{i\pi} + 1 = 0$, links five constants.
+
+% A comment stays in the source but is dimmed in Visual mode.
+
+\section{Method}
+\label{sec:method}
+
+For a square matrix $A$ we have
+\begin{equation}
+  \tr(AB) = \tr(BA), \qquad \det(AB) = \det A \cdot \det B.
+  \label{eq:trace}
+\end{equation}
+Equation~\eqref{eq:trace} holds for any $A, B \in \R^{n\times n}$.
+
+\subsection{Steps}
+
+\begin{enumerate}
+  \item Pick a starting point $x_0$.
+  \item Repeat $x_{k+1} = x_k - \eta \nabla f(x_k)$ until it settles.
+  \item Report $x_k$.
+\end{enumerate}
+
+The step size matters:
+\begin{itemize}
+  \item too small, and it crawls;
+  \item too large, and it diverges\footnote{See any textbook on optimisation.}.
+\end{itemize}
+
+\section{Conclusion}
+
+Gradient descent is simple and often enough~\cite{knuth1984}:
+\[
+  \min_{x \in \R^n} f(x) = \sum_{i=1}^{m} \bigl(y_i - g(x)\bigr)^2 .
+\]
+
+\begin{thebibliography}{9}
+\bibitem{knuth1984} D.~E. Knuth, \emph{The \TeX book}, Addison-Wesley, 1984.
+\end{thebibliography}
+
+\end{document}
