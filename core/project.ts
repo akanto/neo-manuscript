@@ -115,3 +115,53 @@ export function isProjectPath(path: string): boolean {
   if (path === "" || path.startsWith("/") || path.includes("\\") || /^[a-zA-Z]:/.test(path)) return false;
   return path.split("/").every((part) => part !== "" && part !== "." && part !== "..");
 }
+
+/** A project's entries from the paths of its files: the folders they are in too, and none it doesn't show (isHidden). */
+export function entriesOf(files: readonly string[]): ProjectEntry[] {
+  const entries = new Map<string, ProjectEntry>();
+  for (const file of files) {
+    const parts = file.split("/");
+    if (parts.some((part) => part === "" || isHidden(part))) continue;
+    for (let depth = 1; depth < parts.length; depth++) {
+      const folder = parts.slice(0, depth).join("/");
+      entries.set(folder, { path: folder, kind: "folder" });
+    }
+    entries.set(file, { path: file, kind: "file" });
+  }
+  return [...entries.values()].sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/** How mainFileFor sees the project: the names of the files right in a folder ("" for the top), and a file's text. */
+export interface ProjectReader {
+  filesIn(folder: string): Promise<string[]>;
+  read(path: string): Promise<string | null>;
+}
+
+/**
+ * The file that builds a .tex file of the project: the root its "% !TEX root" line names, else the file itself when it
+ * starts a document, else the main file of its folder (as findMainFile picks it), else of the nearest folder above it.
+ * Null for a file of another kind, and when no folder up to the top has one.
+ */
+export async function mainFileFor(file: string, project: ProjectReader): Promise<string | null> {
+  if (kindOf(file) !== "tex") return null;
+  const folderOf = (path: string) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "");
+  const text = await project.read(file);
+  const root = text === null ? null : rootNamedIn(text);
+  if (root) {
+    const parts: string[] = folderOf(file) ? folderOf(file).split("/") : [];
+    for (const part of root.split("/")) {
+      if (part === "..") parts.pop();
+      else if (part !== "." && part !== "") parts.push(part);
+    }
+    const named = parts.join("/");
+    if (isProjectPath(named) && (await project.read(named)) !== null) return named;
+  }
+  if (text !== null && startsDocument(text)) return file;
+  for (let folder: string | null = folderOf(file); folder !== null; folder = folder === "" ? null : folderOf(folder)) {
+    const names = (await project.filesIn(folder)).filter((name) => kindOf(name) === "tex");
+    const candidates = await Promise.all(names.map(async (name) => ({ path: name, text: (await project.read(folder ? `${folder}/${name}` : name)) ?? "" })));
+    const main = findMainFile(candidates, folder.slice(folder.lastIndexOf("/") + 1));
+    if (main) return folder ? `${folder}/${main}` : main;
+  }
+  return null;
+}

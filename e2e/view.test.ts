@@ -5,6 +5,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { chromium, webkit, type Browser, type FrameLocator, type Page } from "playwright-core";
 import { searchPath } from "../core/compile.ts";
@@ -252,8 +253,25 @@ for (const setup of setups) describe.skipIf(!setup.run)(`the view ${setup.name}`
     expect(asked).toStartWith("Is this identity right?\n\n(About this text on page 1 of the PDF:)\n> ");
     expect(asked).toContain("Euler");
     // The line of the PDF begins with the end of source line 25 and goes on with line 26.
-    expect(asked).toContain("(It comes from lines 25–26 of the source:)\n```latex\n");
+    // Mirador names the open file (plugin API 6), so the question does too.
+    expect(asked).toContain("(It comes from lines 25–26 of paper.tex:)\n```latex\n");
     expect(asked).toContain("fastest --- a fact we use in Section~\\ref{sec:method}.\nEuler's identity, $e^{i\\pi} + 1 = 0$");
+  }, 30_000);
+
+  test("a file of the workspace opens from the list, in its language, and the first one comes back", async () => {
+    await mkdir(join(harness.folder, "notes"), { recursive: true });
+    await writeFile(join(harness.folder, "notes", "todo.md"), "# To do\n\n- Write the *paper*.\n");
+    await root.locator(".files button[title='List the files again']").click();
+    await expect(root.locator('.file-row[data-path="paper.tex"] .main-badge').textContent()).resolves.toBe("main");
+    await root.locator('.file-row[data-path="notes"]').click();
+    await root.locator('.file-row[data-path="notes/todo.md"]').click();
+    await root.locator('.app[data-language="markdown"]').waitFor({ timeout: 10_000 });
+    await expect(root.locator(".md-preview h1").textContent()).resolves.toBe("To do");
+    await expect(root.locator(".file-row.open").getAttribute("data-path")).resolves.toBe("notes/todo.md");
+    await root.locator('.file-row[data-path="paper.tex"]').click();
+    await root.locator('.app[data-language="latex"]').waitFor({ timeout: 10_000 });
+    // An earlier test made it "A Bigger Example".
+    await expect(root.locator(".cm-v-title").textContent()).resolves.toEndWith("Example");
   }, 30_000);
 
   test("nothing threw", () => {

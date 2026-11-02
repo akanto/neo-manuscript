@@ -1,7 +1,7 @@
 import { EditorSelection } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import type { Author, DocumentState, HostBridge, TaskState } from "../core/host-api.ts";
-import { reportNamedIn, type BuildReport, type Problem } from "../core/build.ts";
+import { BUILD_FOLDER, reportNamedIn, type BuildReport, type Problem } from "../core/build.ts";
 import type { TexDocument } from "../core/document.ts";
 import { bold, code, createEditor, flashRanges, insertList, insertMath, italic, setHeading, setProblems, type Editor, type Language, type Mode } from "./editor.ts";
 import { MarkdownPreview, mdBold, mdCode, mdHeading, mdItalic, mdList, mdMath } from "./markdown.ts";
@@ -82,6 +82,13 @@ export function startView(host: HostBridge<TexDocument>) {
   let synctex: { data: Synctex; tag: number } | null = null;
   /** The source file of the last build, as its report names it. */
   let builtSource: string | null = null;
+  /**
+   * The folder the last build ran in, as a prefix ("" for the project's top, else "paper/"): its report names its files
+   * from there, and LaTeX names its inputs and figures from there. Mirador's workspace may hold the project in a folder.
+   */
+  let buildFolder = "";
+  const fromBuild = (path: string) => buildFolder + path;
+  const inBuild = (path: string) => (path.startsWith(buildFolder) ? path.slice(buildFolder.length) : path);
   let mode: Mode = recall("mode") === "source" ? "source" : "visual";
   /** With a project: its files, and the file in the editor (null for a host of one document, which has no names). */
   let project: ProjectState | null = null;
@@ -475,7 +482,8 @@ export function startView(host: HostBridge<TexDocument>) {
       const view = editor.view;
       const { data, tag } = synctex;
       const found = sourceForPlace(data, point, (other, line) => (other === tag ? printsIn(view)(line) : true));
-      const file = found && found.tag !== tag ? fileOfTag(data, found.tag, textFiles()) : null;
+      const named = found && found.tag !== tag ? fileOfTag(data, found.tag, textFiles().filter((path) => path.startsWith(buildFolder)).map(inBuild)) : null;
+      const file = named && fromBuild(named);
       if (found && file) return openFile(file, found.line);
     }
     const line = (synctex && lineForPlace(synctex.data, synctex.tag, point, printsIn(editor.view))) ?? lineForPdfText(editor.view.state.doc.toString(), point.text);
@@ -503,6 +511,8 @@ export function startView(host: HostBridge<TexDocument>) {
     }
     return resolved.join("/");
   }
+  /** The main file's folder, as a prefix; the last build's when the project names no main file. */
+  const mainFolder = () => (project?.main ? project.main.slice(0, project.main.lastIndexOf("/") + 1) : buildFolder);
   const problemsOfShownFile = () => {
     if (editorLanguage === "markdown") return [];
     const file = editingFile();
@@ -571,8 +581,15 @@ export function startView(host: HostBridge<TexDocument>) {
 
   async function loadReport(path: string, failure: string | null) {
     if (!host.readFile) return;
-    const report = JSON.parse(await (await host.readFile(path)).text()) as BuildReport;
+    const named = JSON.parse(await (await host.readFile(path)).text()) as BuildReport;
     remember("report", path);
+    buildFolder = path.slice(0, Math.max(0, path.lastIndexOf(`${BUILD_FOLDER}/`)));
+    const report: BuildReport = {
+      ...named,
+      source: fromBuild(named.source),
+      pdf: named.pdf && fromBuild(named.pdf),
+      problems: named.problems.map((problem) => ({ ...problem, file: problem.file && fromBuild(problem.file) })),
+    };
     builtSource = report.source;
     showProblems(report.problems, failure);
     if (setCitations(report.citations)) editor?.view.dispatch({ effects: redraw.of(null) });
@@ -603,7 +620,7 @@ export function startView(host: HostBridge<TexDocument>) {
   /** The SyncTeX of the file in the editor: none when the build didn't read that file. */
   function retag() {
     const source = editingFile() ?? builtSource;
-    const tag = synctexData && source ? tagOf(synctexData, source) : null;
+    const tag = synctexData && source ? tagOf(synctexData, inBuild(source)) : null;
     synctex = synctexData && tag !== null ? { data: synctexData, tag } : null;
   }
 
@@ -782,7 +799,8 @@ export function startView(host: HostBridge<TexDocument>) {
       text: state.document.text,
       mode: modeOfFile(),
       language: editorLanguage,
-      readFile: host.readFile ? (path) => host.readFile!(markdown ? besideEditingFile(path) : path) : null,
+      // A figure's path is named from the main file's folder, as LaTeX names it; a Markdown image's from the file's own.
+      readFile: host.readFile ? (path) => host.readFile!(markdown ? besideEditingFile(path) : mainFolder() + path) : null,
       drawPdf: drawFirstPage,
       onChange: (fromUser) => {
         if (fromUser) sync?.typed();

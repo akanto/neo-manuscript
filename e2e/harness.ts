@@ -3,9 +3,9 @@
  * files and tasks go to this server, which runs the plugin's real host code on a .tex file in a folder of its own.
  * `bun e2e/harness.ts <file.tex>` serves it on http://127.0.0.1:4810.
  */
-import { mkdtemp, readFile, writeFile, cp } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, writeFile, cp } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname, join, normalize } from "node:path";
+import { basename, dirname, join, normalize, relative } from "node:path";
 import type { Author, Change, DocumentState, TaskState } from "../core/host-api.ts";
 import type { TexDocument } from "../core/document.ts";
 import host from "../hosts/mirador/host.ts";
@@ -33,7 +33,14 @@ const BRIDGE = `
     removeItem: (k) => { items.delete(k); },
     clear: () => items.clear(),
   };
-  const emit = (state) => { latest = state; listeners.forEach((l) => l(state)); };
+  const fileListeners = new Set();
+  const emit = (state) => {
+    const filesChanged = latest !== undefined && latest.filesChange !== state.filesChange;
+    latest = state;
+    listeners.forEach((l) => l(state));
+    if (filesChanged) fileListeners.forEach((l) => l());
+  };
+  const answered = (r) => r.ok ? r : r.text().then((message) => Promise.reject(new Error(message)));
   const poll = async () => {
     let seen = -1;
     for (;;) {
@@ -50,6 +57,9 @@ const BRIDGE = `
     apply(op) { fetch("/apply", { method: "POST", body: JSON.stringify({ op, author: { kind: "you" } }) }); },
     prompt(text) { window.__prompts.push(text); return Promise.resolve(); },
     readFile(path) { return fetch("/file?path=" + encodeURIComponent(path)).then((r) => r.ok ? r.blob() : Promise.reject(new Error(path + " not found"))); },
+    listFiles() { return fetch("/files").then(answered).then((r) => r.json()); },
+    open(file) { return fetch("/open?file=" + encodeURIComponent(file), { method: "POST" }).then(answered).then(() => undefined); },
+    onFiles(listener) { fileListeners.add(listener); return () => fileListeners.delete(listener); },
     run(task) { fetch("/run", { method: "POST", body: JSON.stringify({ task }) }); },
     stopTask() {},
     storage,
@@ -108,6 +118,10 @@ function miradorParentPage(canvas: MiradorCanvas, assets: string) {
     if (m.kind === "app-apply") fetch("/apply", { method: "POST", body: JSON.stringify({ op: m.op, author: { kind: "you" } }) });
     if (m.kind === "app-run") fetch("/run", { method: "POST", body: JSON.stringify({ task: m.task }) });
     if (m.kind === "app-prompt") { window.__prompts.push(m.text); post({ source: "mirador-canvas", kind: "app-answer", requestId: m.requestId, value: null }); }
+    const answer = (value) => post({ source: "mirador-canvas", kind: "app-answer", requestId: m.requestId, value });
+    const refuse = (message) => post({ source: "mirador-canvas", kind: "app-answer-failed", requestId: m.requestId, message });
+    if (m.kind === "app-list-files") fetch("/files").then((r) => r.json()).then(answer);
+    if (m.kind === "app-open") fetch("/open?file=" + encodeURIComponent(m.file), { method: "POST" }).then(async (r) => (r.ok ? answer(null) : refuse(await r.text())));
     if (m.kind === "app-read-file") {
       const response = await fetch("/file?path=" + encodeURIComponent(m.path));
       if (!response.ok) post({ source: "mirador-canvas", kind: "app-file-failed", requestId: m.requestId, message: m.path + " not found" });
@@ -129,7 +143,8 @@ export interface HarnessOptions {
 export async function startHarness(source: string, { port = 0, mirador = false }: HarnessOptions = {}): Promise<Harness> {
   const canvas = mirador ? ((await import(MIRADOR_CANVAS)) as MiradorCanvas) : null;
   const folder = await mkdtemp(join(tmpdir(), "manuscript-harness-"));
-  const file = join(folder, basename(source));
+  /** The open document's file, as Mirador's API 6 names it: from the workspace, which is the folder. */
+  let file = join(folder, basename(source));
   await cp(source, file);
   for (const extra of ["figure.png", "figure.pdf"]) await cp(join(dirname(source), extra), join(folder, extra)).catch(() => {});
 
@@ -141,7 +156,9 @@ export async function startHarness(source: string, { port = 0, mirador = false }
   let waiting: (() => void)[] = [];
   const view = await readFile(join(import.meta.dir, "..", "dist", "view.js"), "utf8");
 
-  const state = (): DocumentState<TexDocument> => ({ workspaceId: "test", app: "neo-manuscript", document, lastChange, problem: null, task });
+  /** Moves when the folder's files may have changed: after a task and an open, as in Mirador. */
+  let filesChange = 0;
+  const state = (): DocumentState<TexDocument> & { filesChange: number } => ({ workspaceId: "test", app: "neo-manuscript", file: relative(folder, file), filesChange, document, lastChange, problem: null, task });
   const changed = () => {
     version++;
     waiting.forEach((wake) => wake());
@@ -162,8 +179,8 @@ export async function startHarness(source: string, { port = 0, mirador = false }
     try {
       const summary = await host.tasks![name]!.run({
         document,
-        file: (path) => join(folder, path),
-        documentFolder: folder,
+        file: (path) => join(dirname(file), path),
+        documentFolder: dirname(file),
         workspaceFolder: folder,
         pluginFolder: join(import.meta.dir, ".."),
         author: { kind: "you" },
@@ -178,6 +195,7 @@ export async function startHarness(source: string, { port = 0, mirador = false }
     } catch (error) {
       task = { ...task!, state: "failed", problem: (error as Error).message, endedAt: Date.now() };
     }
+    filesChange++;
     changed();
   };
 
@@ -215,10 +233,26 @@ export async function startHarness(source: string, { port = 0, mirador = false }
         return new Response("ok");
       }
       if (url.pathname === "/file") {
-        const path = normalize(url.searchParams.get("path") ?? "");
+        // Named from the document's folder; "../" leads up to the workspace, not out of it.
+        const path = relative(folder, join(dirname(file), url.searchParams.get("path") ?? ""));
         if (path.startsWith("..")) return new Response("outside", { status: 403 });
         const target = Bun.file(join(folder, path));
         return (await target.exists()) ? new Response(target) : new Response("missing", { status: 404 });
+      }
+      if (url.pathname === "/files") {
+        const files = (await readdir(folder, { recursive: true, withFileTypes: true })).filter((entry) => entry.isFile()).map((entry) => relative(folder, join(entry.parentPath, entry.name)));
+        return Response.json({ files: files.filter((path) => !path.startsWith(".latex-build")).sort(), truncated: false });
+      }
+      if (url.pathname === "/open" && request.method === "POST") {
+        const path = normalize(url.searchParams.get("file") ?? "");
+        if (path.startsWith("..") || !(await Bun.file(join(folder, path)).exists())) return new Response(`${path} isn't a file of the workspace.`, { status: 400 });
+        if (task?.state === "running") return new Response("A task is running.", { status: 409 });
+        file = join(folder, path);
+        document = host.parse(await readFile(file, "utf8"));
+        lastChange = null;
+        filesChange++;
+        changed();
+        return new Response("ok");
       }
       return new Response("not found", { status: 404 });
     },

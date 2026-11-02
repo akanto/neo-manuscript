@@ -1,38 +1,39 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { readdir, readFile } from "node:fs/promises";
+import { dirname, join, relative, sep } from "node:path";
 import { compile, sourceFileOf, type CompileContext } from "../../core/compile.ts";
 import { describeDocument } from "../../core/describe.ts";
 import { NEW_DOCUMENT, parseDocument, serializeDocument, type TexDocument } from "../../core/document.ts";
 import { applyOperation, parseOperation } from "../../core/ops.ts";
-import { listProject, PROJECT_LISTING } from "../../core/project-files.ts";
-import { kindOf, looksLikeMarkdown, startsDocument, type ProjectState } from "../../core/project.ts";
-import type { AppHost } from "./api.ts";
+import { kindOf, looksLikeMarkdown, mainFileFor, startsDocument } from "../../core/project.ts";
+import type { AppHost, AppTaskContext } from "./api.ts";
+
+const posix = (path: string) => path.split(sep).join("/");
 
 /**
- * Writes the project's files, its main file and the document's own file to PROJECT_LISTING, where the view reads them:
- * Mirador's view can read files next to the document, but can't list them. The project is the document's folder.
+ * Builds the document, or the main file that builds it when it is a part (a chapter): the one its "% !TEX root" line
+ * names, else the main file of its folder or of the nearest one above it in the workspace. The build goes in the main
+ * file's folder; the report the summary names is named from the workspace, as the view names files.
  */
-async function writeListing(context: CompileContext): Promise<ProjectState> {
-  const folder = context.documentFolder;
-  const { entries, main } = await listProject(folder);
-  const listing: ProjectState = { name: basename(folder), entries, main, open: await sourceFileOf(folder, context.document, [".tex", ".md", ".markdown"]) };
-  const path = join(folder, PROJECT_LISTING);
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(listing)}\n`);
-  return listing;
-}
+async function build(context: AppTaskContext<TexDocument>): Promise<string> {
+  const { documentFolder, workspaceFolder, document } = context;
+  // A Markdown file isn't built: the view renders it.
+  const own = await sourceFileOf(documentFolder, document, [".tex", ".md", ".markdown"]);
+  if (own ? kindOf(own) === "markdown" : looksLikeMarkdown(document.text)) return `${own ?? "The document"} is Markdown: there is nothing to build.`;
 
-/** Builds the document, or the project's main file when the document is a part of it (a chapter), and lists the files. */
-async function build(context: CompileContext): Promise<string> {
+  const ownPath = own && posix(relative(workspaceFolder, join(documentFolder, own)));
+  const main = ownPath && !startsDocument(document.text)
+    ? await mainFileFor(ownPath, {
+        filesIn: async (folder) => (await readdir(join(workspaceFolder, folder), { withFileTypes: true }).catch(() => [])).filter((entry) => entry.isFile()).map((entry) => entry.name),
+        read: (path) => readFile(join(workspaceFolder, path), "utf8").catch(() => null),
+      })
+    : null;
+  const plan: CompileContext = main && main !== ownPath ? { ...context, documentFolder: join(workspaceFolder, dirname(main)), source: main.slice(main.lastIndexOf("/") + 1) } : context;
+  const folder = posix(relative(workspaceFolder, plan.documentFolder));
+  const fromWorkspace = (text: string) => (folder ? text.replace(/Report: (\S+\.report\.json)/, `Report: ${folder}/$1`) : text);
   try {
-    // A Markdown file isn't built: the view renders it.
-    const file = await sourceFileOf(context.documentFolder, context.document, [".tex", ".md", ".markdown"]);
-    if (file ? kindOf(file) === "markdown" : looksLikeMarkdown(context.document.text)) return `${file ?? "The document"} is Markdown: there is nothing to build.`;
-    if (startsDocument(context.document.text)) return await compile(context);
-    const { main } = await listProject(context.documentFolder);
-    return await compile(main ? { ...context, source: main } : context);
-  } finally {
-    await writeListing(context).catch(() => {});
+    return fromWorkspace(await compile(plan));
+  } catch (error) {
+    throw new Error(fromWorkspace((error as Error).message));
   }
 }
 
@@ -44,16 +45,9 @@ const host: AppHost<TexDocument> = {
     return applyOperation(document, parseOperation(operation));
   },
   describe: (document) => describeDocument(document, 'app_run "compile"'),
-  create: () => parseDocument(NEW_DOCUMENT),
+  create: (openedFile) => parseDocument(openedFile && kindOf(openedFile) !== "tex" ? "" : NEW_DOCUMENT),
   tasks: {
     compile: { title: "Compile the PDF", run: build },
-    files: {
-      title: "List the project's files",
-      run: async (context) => {
-        const { entries, main } = await writeListing(context);
-        return `Listed ${entries.filter((entry) => entry.kind === "file").length} files; the main file is ${main ?? "not there"}.`;
-      },
-    },
   },
 };
 

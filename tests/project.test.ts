@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { findMainFile, firstFileOf, isProjectPath, isTextFile, kindOf, looksLikeMarkdown, rootNamedIn, startsDocument } from "../core/project.ts";
+import { entriesOf, findMainFile, firstFileOf, isProjectPath, isTextFile, kindOf, looksLikeMarkdown, mainFileFor, type ProjectReader, rootNamedIn, startsDocument } from "../core/project.ts";
 
 const DOCUMENT = "\\documentclass{article}\n\\begin{document}\nHi.\n\\end{document}\n";
 const CHAPTER = "\\chapter{Intro}\nText.\n";
@@ -73,4 +73,34 @@ test("a text reads as Markdown by its structure, unless it has LaTeX's", async (
   expect(looksLikeMarkdown(await Bun.file(new URL("../examples/paper.tex", import.meta.url)).text())).toBe(false);
   expect(looksLikeMarkdown("\\section{Intro}\n- not a list in LaTeX, but LaTeX's commands win\n")).toBe(false);
   expect(looksLikeMarkdown("Plain words only.")).toBe(false);
+});
+
+describe("a project from a list of files", () => {
+  test("its folders come from the paths, and hidden files stay out", () => {
+    expect(entriesOf(["paper/main.tex", "paper/chapters/intro.tex", ".git/config", "README.md", "paper/.latex-build/main.pdf"])).toEqual([
+      { path: "paper", kind: "folder" },
+      { path: "paper/chapters", kind: "folder" },
+      { path: "paper/chapters/intro.tex", kind: "file" },
+      { path: "paper/main.tex", kind: "file" },
+      { path: "README.md", kind: "file" },
+    ]);
+  });
+
+  const reader = (files: Record<string, string>): ProjectReader => ({
+    filesIn: async (folder) => Object.keys(files).filter((path) => (folder ? path.startsWith(`${folder}/`) && !path.slice(folder.length + 1).includes("/") : !path.includes("/"))).map((path) => path.slice(path.lastIndexOf("/") + 1)),
+    read: async (path) => files[path] ?? null,
+  });
+
+  test("a chapter builds with the main file of its folder or the nearest one above", async () => {
+    const files = { "paper/main.tex": DOCUMENT, "paper/chapters/intro.tex": CHAPTER, "notes.tex": CHAPTER };
+    expect(await mainFileFor("paper/chapters/intro.tex", reader(files))).toBe("paper/main.tex");
+    expect(await mainFileFor("paper/main.tex", reader(files))).toBe("paper/main.tex");
+    expect(await mainFileFor("notes.tex", reader(files))).toBeNull();
+    expect(await mainFileFor("README.md", reader(files))).toBeNull();
+  });
+
+  test("a % !TEX root line names the main file", async () => {
+    const files = { "thesis.tex": DOCUMENT, "main.tex": DOCUMENT, "parts/a.tex": "% !TEX root = ../thesis.tex\n\\section{A}" };
+    expect(await mainFileFor("parts/a.tex", reader(files))).toBe("thesis.tex");
+  });
 });

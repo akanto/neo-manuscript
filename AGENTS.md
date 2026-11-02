@@ -34,8 +34,8 @@ bun hosts/desktop/serve.ts <folder>   # the desktop app's server alone, to use t
   loads the view from, with a per-run token; states go back as server-sent events), `view.ts` (the view's bridge to
   it), `project-host.ts` (a folder: files, main file, builds, watching), `document-host.ts` (one open text file),
   `agents.ts` and `chat.ts` (ACP agents), `updates.ts`, `settings.ts`.
-- `hosts/mirador/`: the Mirador plugin. `host.ts` is the AppHost Mirador runs; `api.ts` copies the parts of
-  Mirador's plugin API it uses; `project.ts` gives the view the project's files.
+- `hosts/mirador/`: the Mirador plugin (plugin API 6). `host.ts` is the AppHost Mirador runs; `api.ts` copies the parts
+  of Mirador's plugin API it uses; `project.ts` gives the view the workspace as its project.
 - `scripts/`: `build.ts` (bundles a view, with KaTeX's fonts and pdf.js's worker inside, since Mirador's frame loads
   nothing from the network), `build-desktop.ts` (desktop view, agent bundles, notices), `thesaurus.ts` (WordNet),
   `notices.ts` (THIRD-PARTY-NOTICES).
@@ -58,8 +58,11 @@ bun hosts/desktop/serve.ts <folder>   # the desktop app's server alone, to use t
   added after the user's first message). Conversations resume with ACP `session/load`; projects open by real path
   because agents file sessions by it.
 - **Agents (Mirador)**: `app_state`, `apply` (`replace`, `insert`, `replace_lines`, `set_text`) and `app_run compile`.
-  Mirador's view API can't list files or open another file, so builds and the `files` task write
-  `.latex-build/project.json` for the view.
+- **Mirador's view**: the project is the workspace, and paths are named from it, as the desktop app names them from its
+  folder. The view lists it with `listFiles` (again on `onFiles`), opens a file with `open` (after a running build ends,
+  as Mirador refuses it during one) and reads files through `../` from the document's folder. A chapter builds with the
+  main file its `% !TEX root` names, else the nearest one in its folder or above (`mainFileFor`); the build goes in that
+  file's folder, and the view rebases the report's paths onto the folder its report is in.
 - **Updates**: `release.baseUrl` in `electrobun.config.ts` (GitHub `releases/latest/download`). `updates.ts` also ends
   the launcher Electrobun 2.0.5 leaves behind on the first start, which otherwise stops the app from relaunching after
   an update.

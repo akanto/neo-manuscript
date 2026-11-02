@@ -43,8 +43,8 @@ bun install && bun run build
 ln -s "$PWD" ~/.mirador/plugins/neo-manuscript
 ```
 
-Restart Mirador and ask its agent to open a `.tex` or `.md` file in NeoManuscript. Mirador's plugin API can't switch the app
-to another file yet, so other files in the project open read-only; **Edit** asks the agent to open them.
+Restart Mirador and ask its agent to open a `.tex` or `.md` file in NeoManuscript. The workspace's files are listed on
+the left; click one to edit it. It needs Mirador with plugin API 6.
 
 ## Building from source
 
