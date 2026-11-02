@@ -123,6 +123,24 @@ export class PdfViewer {
     if (this.laidOut) this.showWantedPlace();
   }
 
+  /** The scroll offset that puts a place at the top, as scrollToPlace does; null before the pages are laid out. */
+  offsetOf(place: PagePlace): number | null {
+    const box = this.laidOut ? (this.pages.children[place.page - 1] as HTMLDivElement | undefined) : undefined;
+    if (!box) return null;
+    return box.getBoundingClientRect().top - this.element.getBoundingClientRect().top + this.element.scrollTop + place.y * this.scaleUsed - PLACE_MARGIN;
+  }
+
+  /** How far the pages scroll, at most. */
+  get scrollRange(): number {
+    return this.element.scrollHeight - this.element.clientHeight;
+  }
+
+  /** Scrolls to an offset at once, as when following the editor. */
+  scrollToOffset(top: number) {
+    this.wantedPlace = null;
+    this.element.scrollTop = Math.max(0, top);
+  }
+
   /** Scrolls to the place asked for; it stays wanted for a moment, as the preview coming into sight lays it out anew. */
   private showWantedPlace() {
     const wanted = this.wantedPlace;

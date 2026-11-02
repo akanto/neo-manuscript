@@ -258,6 +258,29 @@ for (const setup of setups) describe.skipIf(!setup.run)(`the view ${setup.name}`
     expect(asked).toContain("fastest --- a fact we use in Section~\\ref{sec:method}.\nEuler's identity, $e^{i\\pi} + 1 = 0$");
   }, 30_000);
 
+  test("the PDF scrolls with the editor while the lock is on", async () => {
+    await root.getByRole("button", { name: "Split", exact: true }).click();
+    const pdfTop = () => root.locator(".pdf-scroll").evaluate((element) => element.scrollTop);
+    const scrollEditorTo = (heading: string) =>
+      root.locator(".cm-scroller").evaluate((scroller, heading) => {
+        const line = [...scroller.querySelectorAll(".cm-line")].find((candidate) => candidate.textContent?.includes(heading) && /cm-v-h/.test(candidate.className))!;
+        scroller.scrollTop += line.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+      }, heading);
+    await scrollEditorTo("Method");
+    await Bun.sleep(300);
+    expect(await pdfTop()).toBeGreaterThan(100);
+    await root.locator(".cm-scroller").evaluate((scroller) => (scroller.scrollTop = 0));
+    await Bun.sleep(300);
+    expect(await pdfTop()).toBe(0);
+    // Unlocked, the PDF stays where it is.
+    await root.locator(".scroll-lock").click();
+    await scrollEditorTo("Method");
+    await Bun.sleep(300);
+    expect(await pdfTop()).toBe(0);
+    await root.locator(".scroll-lock").click();
+    await root.locator(".cm-scroller").evaluate((scroller) => (scroller.scrollTop = 0));
+  });
+
   test("a file of the workspace opens from the list, in its language, and the first one comes back", async () => {
     await mkdir(join(harness.folder, "notes"), { recursive: true });
     await writeFile(join(harness.folder, "notes", "todo.md"), "# To do\n\n- Write the *paper*.\n");

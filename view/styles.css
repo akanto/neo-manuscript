@@ -161,6 +161,9 @@ button:disabled { opacity: 0.5; cursor: default; }
 .app[data-layout="pdf"] .file-preview, .app[data-layout="pdf"] .editor-pane, .app[data-layout="pdf"] .divider, .app[data-layout="pdf"] .edit-tools { display: none; }
 .edit-tools { display: contents; }
 .layout-switch { margin-left: 6px; }
+/* The scroll lock: on, the PDF or the preview follows the editor; it matters only side by side. */
+.scroll-lock.on { background: var(--accent-bg) !important; color: var(--accent); }
+.app:not([data-layout="split"]) .scroll-lock { display: none; }
 .build-badge { font-size: 12px !important; color: var(--error); background: var(--error-bg) !important; margin-left: 6px; }
 .build-badge[hidden] { display: none; }
 .loading, .pdf-empty { padding: 24px; color: var(--muted); }

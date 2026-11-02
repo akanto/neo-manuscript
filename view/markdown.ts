@@ -876,6 +876,31 @@ export class MarkdownPreview {
     }
   }
 
+  /**
+   * The scroll offset that shows a place in the source at the top: a 1-based line, with a fraction for how far into it.
+   * Between the source lines blocks start on, it goes as far between the blocks.
+   */
+  offsetOfLine(position: number): number | null {
+    const blocks = [...this.element.querySelectorAll<HTMLElement>(":scope > .md-block")];
+    if (blocks.length === 0) return null;
+    const base = this.element.getBoundingClientRect().top - this.element.scrollTop;
+    const topOf = (block: HTMLElement) => block.getBoundingClientRect().top - base;
+    let index = blocks.findLastIndex((block) => Number(block.dataset.line) <= position);
+    if (index === -1) return 0;
+    const block = blocks[index]!;
+    const next = blocks[index + 1];
+    const from = Number(block.dataset.line);
+    const to = next ? Number(next.dataset.line) : null;
+    const end = next ? topOf(next) : this.element.scrollHeight;
+    const share = to !== null && to > from ? Math.min(1, (position - from) / (to - from)) : 0;
+    return topOf(block) + share * (end - topOf(block)) - 8;
+  }
+
+  /** How far the preview scrolls, at most. */
+  get scrollRange(): number {
+    return this.element.scrollHeight - this.element.clientHeight;
+  }
+
   /** Scrolls the preview to show the block that comes from this 1-based source line, roughly. */
   scrollToLine(line: number): void {
     let target: HTMLElement | null = null;

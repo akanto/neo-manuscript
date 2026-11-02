@@ -12,7 +12,7 @@ import { lineForPdfText } from "./pdf-sync.ts";
 import css from "./styles.css" with { type: "text" };
 import { DocumentSync, fromHost } from "./sync.ts";
 import { commentStart } from "../core/latex.ts";
-import { fileOfTag, lineForPlace, placeForLine, readSynctex, sourceForPlace, tagOf, type Synctex } from "./synctex.ts";
+import { fileOfTag, lineForPlace, placeForLine, readSynctex, sourceForPlace, tagOf, type PagePlace, type Synctex } from "./synctex.ts";
 import { isTextFile, kindOf, looksLikeMarkdown, type ProjectState } from "../core/project.ts";
 import { unpackThesaurus, type Thesaurus } from "./thesaurus.ts";
 import { forgetFigures, redraw, setCitations } from "./visual.ts";
@@ -228,6 +228,79 @@ export function startView(host: HostBridge<TexDocument>) {
     return view.state.doc.lineAt(view.lineBlockAtHeight(Math.max(0, top)).from).number;
   }
 
+  // --- The PDF or the preview follows the editor's scrolling ---------------------------------------------------------
+
+  let scrollLock = recall("scrollLock") !== "off";
+  const lockButton = button("⇅", "", () => setScrollLock(!scrollLock), "scroll-lock");
+  function setScrollLock(on: boolean) {
+    scrollLock = on;
+    remember("scrollLock", on ? "on" : "off");
+    lockButton.classList.toggle("on", on);
+    lockButton.title = on ? "The PDF or the preview scrolls with the editor; click to scroll them apart" : "Scroll the PDF or the preview with the editor";
+    if (on) followEditor();
+  }
+
+  let following = false;
+  /** The editor scrolled: the other side follows in the next frame. */
+  function wantFollow() {
+    if (following || !scrollLock || layout !== "split") return;
+    following = true;
+    requestAnimationFrame(() => {
+      following = false;
+      followEditor();
+    });
+  }
+
+  /** Where SyncTeX puts each source line, for the last build: worked out once per line. */
+  let placeCache = new Map<number, PagePlace | null>();
+
+  /** Scrolls the PDF or the preview to what the top of the editor shows. */
+  function followEditor() {
+    if (!editor || !scrollLock || layout !== "split") return;
+    const scroller = editor.view.scrollDOM;
+    const range = scroller.scrollHeight - scroller.clientHeight;
+    // At either end of the editor, the other side goes to its end too.
+    const end = range <= 0 || scroller.scrollTop <= 0 ? 0 : scroller.scrollTop >= range - 1 ? 1 : null;
+    const position = topPosition(editor.view);
+    if (editorLanguage === "markdown") {
+      const top = end !== null ? end * markdownPreview.scrollRange : markdownPreview.offsetOfLine(position);
+      if (top !== null) markdownPreview.element.scrollTop = Math.max(0, top);
+      return;
+    }
+    if (end !== null) return viewer.scrollToOffset(end * viewer.scrollRange);
+    const top = synctex ? pdfOffsetFor(position) : null;
+    // Without SyncTeX, the same share of the way down.
+    viewer.scrollToOffset(top ?? (scroller.scrollTop / range) * viewer.scrollRange);
+  }
+
+  /** The PDF's offset for a place in the source, between where SyncTeX puts its line and the next. */
+  function pdfOffsetFor(position: number): number | null {
+    if (!synctex) return null;
+    const { data, tag } = synctex;
+    const offsetOf = (line: number) => {
+      if (!placeCache.has(line)) placeCache.set(line, placeForLine(data, tag, line));
+      const place = placeCache.get(line);
+      return place ? viewer.offsetOf(place) : null;
+    };
+    const line = Math.floor(position);
+    const here = offsetOf(line);
+    if (here === null) return null;
+    const next = offsetOf(line + 1);
+    return next === null || next < here ? here : here + (position - line) * (next - here);
+  }
+
+  /** What is at the top of the editor: a 1-based line, and how far into it, as a fraction. */
+  function topPosition(view: EditorView): number {
+    const top = Math.max(0, view.scrollDOM.getBoundingClientRect().top - view.documentTop);
+    const block = view.lineBlockAtHeight(top);
+    const doc = view.state.doc;
+    // In Visual mode a block on screen may hold several lines of the source (a paragraph, a table).
+    const first = doc.lineAt(block.from).number;
+    const last = doc.lineAt(block.to).number;
+    const share = block.height > 0 ? Math.min(1, Math.max(0, (top - block.top) / block.height)) : 0;
+    return first + share * (last + 1 - first);
+  }
+
   /** ⌥⌘P: the PDF beside the editor, or away again. */
   function togglePreview() {
     setLayout(layout === "editor" ? "split" : "editor");
@@ -238,9 +311,11 @@ export function startView(host: HostBridge<TexDocument>) {
     element("span", { className: "grow" }),
     lastChange,
     buildBadge,
+    lockButton,
     element("div", { className: "segmented layout-switch" }, layoutButtons.editor, layoutButtons.split, layoutButtons.pdf),
   );
   setLayout(layout);
+  setScrollLock(scrollLock);
 
   // --- The chat with the agent, for a host that has one; Ask goes to it ---------------------------------------------
 
@@ -460,6 +535,7 @@ export function startView(host: HostBridge<TexDocument>) {
     if (!editor || editorLanguage !== "markdown" || layout === "editor") return;
     try {
       markdownPreview.show(editor.view.state.doc.toString());
+      followEditor();
     } catch (error) {
       // Said in the pane, which would otherwise stay empty.
       markdownPreview.element.replaceChildren(element("p", { className: "md-preview-error" }, `The preview can't be drawn: ${(error as Error).message}`));
@@ -599,6 +675,7 @@ export function startView(host: HostBridge<TexDocument>) {
       await viewer.show(bytes);
       synctexData = await loadSynctex(report);
       retag();
+      followEditor();
       placeholder.hidden = true;
       forgetFigures();
       editor?.view.dispatch({ effects: redraw.of(null) });
@@ -622,6 +699,7 @@ export function startView(host: HostBridge<TexDocument>) {
     const source = editingFile() ?? builtSource;
     const tag = synctexData && source ? tagOf(synctexData, inBuild(source)) : null;
     synctex = synctexData && tag !== null ? { data: synctexData, tag } : null;
+    placeCache = new Map();
   }
 
   // --- Compiling ----------------------------------------------------------------------------------------------------
@@ -820,6 +898,7 @@ export function startView(host: HostBridge<TexDocument>) {
       if (editor && author?.kind !== "you") flashRanges(editor.view, ranges);
     };
     sync.onSettled = tryCompile;
+    editor.view.scrollDOM.addEventListener("scroll", wantFollow, { passive: true });
     setMode(mode);
     retag();
     editor.view.dispatch({ effects: setProblems.of(problemsOfShownFile()) });
