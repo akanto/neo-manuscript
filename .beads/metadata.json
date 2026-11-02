@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "neo_manuscript",
+  "project_id": "1bced947-1b1f-43f1-be89-997ff29080bd"
+}

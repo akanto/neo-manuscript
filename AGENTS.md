@@ -26,7 +26,8 @@ bun hosts/desktop/serve.ts <folder>   # the desktop app's server alone, to use t
   document in words for an agent), `agent-tools.ts`, `project.ts` and `project-files.ts` (files, main file),
   `chat.ts` (chat events), and `host-api.ts`: the `HostBridge` the view talks to its host through. A bridge's
   `project` and `chat` parts are optional, and so are most project operations; the view offers only what a host has.
-- `view/`: the editor (`main.ts`, `editor.ts`, `visual.ts` on `scan.ts`'s tokens), `sync.ts` (keeps the editor and the
+- `view/`: the editor (`main.ts`, `editor.ts`, `visual.ts` on `scan.ts`'s tokens; `markdown.ts` for Markdown files:
+  their highlighting, Visual mode, commands and the preview shown in place of the PDF), `sync.ts` (keeps the editor and the
   host's text the same, merging remote changes around the cursor), `pdf.ts` and `synctex.ts`, `files.ts` (the file
   tree), `chat.ts` (the chat panel).
 - `hosts/desktop/`: the Electrobun app. `main.ts` (window, menus, dialogs), `server.ts` (127.0.0.1 server the window
@@ -45,6 +46,9 @@ bun hosts/desktop/serve.ts <folder>   # the desktop app's server alone, to use t
   Biber between passes; Tectonic. Output goes to `.latex-build/`, with a `<job>.report.json` the view reads. TeX is
   also looked for in `/Library/TeX/texbin`, `/opt/homebrew/bin` and `/usr/local/bin`, as apps started from the Dock
   don't get the shell's PATH.
+- **Markdown**: `.md` and `.markdown` files are edited as Markdown and don't build; the preview pane renders them.
+  A folder with no main file opens its README.md, else index.md, else its first Markdown file. A project with no
+  `.tex` file at all doesn't build, and the agent is told it is Markdown.
 - **Main file**: `main.tex`, else the only top-level `.tex` with `\documentclass`, else the one named like the
   folder, else the first by name; the user can choose another in the desktop app.
 - **Agents (desktop)**: Claude Code via `claude-agent-acp` and pi via `pi-acp`, bundled into `dist/desktop/agents` and
@@ -72,3 +76,82 @@ an update locally, build two versions with `NEO_RELEASE_BASE_URL=http://127.0.0.
 - Bun and TypeScript throughout; no Node-only tooling.
 - Comments and messages in plain, short sentences that say what a thing is or does.
 - Run the typecheck and unit tests before committing; run `bun run e2e` when the view changes.
+
+<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:1105d646 -->
+## Beads Issue Tracker
+
+This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
+
+### Quick Reference
+
+```bash
+bd ready              # Find available work
+bd show <id>          # View issue details
+bd update <id> --claim  # Claim work
+bd close <id>         # Complete work
+```
+
+### Rules
+
+- Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
+- Run `bd prime` for detailed command reference and session close protocol
+- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
+
+**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/core-concepts/sync-concepts.md for details and anti-patterns.
+
+## Agent Context Profiles
+
+The managed Beads block is task-tracking guidance, not permission to override repository, user, or orchestrator instructions.
+
+- **Conservative (default)**: Use `bd` for task tracking. Do not run git commits, git pushes, or Dolt remote sync unless explicitly asked. At handoff, report changed files, validation, and suggested next commands.
+- **Minimal**: Keep tool instruction files as pointers to `bd prime`; use the same conservative git policy unless active instructions say otherwise.
+- **Team-maintainer**: Only when the repository explicitly opts in, agents may close beads, run quality gates, commit, and push as part of session close. A current "do not commit" or "do not push" instruction still wins.
+
+## Session Completion
+
+This protocol applies when ending a Beads implementation workflow. It is subordinate to explicit user, repository, and orchestrator instructions.
+
+1. **File issues for remaining work** - Create beads for anything that needs follow-up
+2. **Run quality gates** (if code changed) - Tests, linters, builds
+3. **Update issue status** - Close finished work, update in-progress items
+4. **Handle git/sync by active profile**:
+   ```bash
+   # Conservative/minimal/default: report status and proposed commands; wait for approval.
+   git status
+
+   # Team-maintainer opt-in only, unless current instructions forbid it:
+   git pull --rebase
+   git push
+   git status
+   ```
+5. **Hand off** - Summarize changes, validation, issue status, and any blocked sync/commit/push step
+
+**Critical rules:**
+- Explicit user or orchestrator instructions override this Beads block.
+- Do not commit or push without clear authority from the active profile or the current user request.
+- If a required sync or push is blocked, stop and report the exact command and error.
+<!-- END BEADS INTEGRATION -->
+
+<!-- BEGIN BEADS CODEX SETUP: generated by bd setup codex -->
+## Beads Issue Tracker
+
+Use Beads (`bd`) for durable task tracking in repositories that include it. Use the `beads` skill at `.agents/skills/beads/SKILL.md` (project install) or `~/.agents/skills/beads/SKILL.md` (global install) for Beads workflow guidance, then use the `bd` CLI for issue operations.
+
+### Quick Reference
+
+```bash
+bd ready                # Find available work
+bd show <id>            # View issue details
+bd update <id> --claim  # Claim work
+bd close <id>           # Complete work
+bd prime                # Refresh Beads context
+```
+
+### Rules
+
+- Use `bd` for all task tracking; do not create markdown TODO lists.
+- Run `bd prime` when Beads context is missing or stale. Codex 0.129.0+ can load Beads context automatically through native hooks; use `/hooks` to inspect or toggle them.
+- Keep persistent project memory in Beads via `bd remember`; do not create ad hoc memory files.
+
+**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/core-concepts/sync-concepts.md for details and anti-patterns.
+<!-- END BEADS CODEX SETUP -->
