@@ -19,8 +19,11 @@ import type { Problem } from "../core/build.ts";
 import { scan, type Token } from "./scan.ts";
 import { synonyms, type SynonymOptions } from "./synonyms.ts";
 import { visualMode, type FileReader, type PdfDrawer } from "./visual.ts";
+import { markdownLanguage, markdownVisual, mdBold, mdItalic, mdMath } from "./markdown.ts";
 
 export type Mode = "source" | "visual";
+/** What the editor's text is written in: LaTeX (a .tex file, or another text file, which shows as LaTeX does), or Markdown. */
+export type Language = "latex" | "markdown";
 
 const highlight = HighlightStyle.define([
   { tag: tags.keyword, class: "tok-command" },
@@ -197,6 +200,7 @@ export interface EditorOptions {
   parent: HTMLElement;
   text: string;
   mode: Mode;
+  language: Language;
   readFile: FileReader | null;
   drawPdf: PdfDrawer | null;
   onChange: (fromUser: boolean) => void;
@@ -214,8 +218,10 @@ export interface Editor {
 
 export function createEditor(options: EditorOptions): Editor {
   const modeCompartment = new Compartment();
+  const markdown = options.language === "markdown";
+  const visual = (): Extension => (markdown ? markdownVisual(options.readFile) : visualMode(options.readFile, options.drawPdf));
   const modeExtension = (mode: Mode): Extension =>
-    mode === "visual" ? visualMode(options.readFile, options.drawPdf) : [lineNumbers(), highlightActiveLineGutter(), EditorView.editorAttributes.of({ class: "cm-source" })];
+    mode === "visual" ? visual() : [lineNumbers(), highlightActiveLineGutter(), EditorView.editorAttributes.of({ class: "cm-source" })];
 
   const view = new EditorView({
     parent: options.parent,
@@ -230,16 +236,15 @@ export function createEditor(options: EditorOptions): Editor {
         search({ top: true }),
         highlightSelectionMatches(),
         EditorView.lineWrapping,
-        StreamLanguage.define(stex),
-        syntaxHighlighting(highlight),
+        markdown ? markdownLanguage() : [StreamLanguage.define(stex), syntaxHighlighting(highlight)],
         problemField,
         flashField,
         options.synonyms ? synonyms(options.synonyms) : [],
         keymap.of([
-          { key: "Mod-b", run: bold },
-          { key: "Mod-i", run: italic },
-          { key: "Mod-m", run: insertMath(false) },
-          { key: "Mod-Shift-m", run: insertMath(true) },
+          { key: "Mod-b", run: markdown ? mdBold : bold },
+          { key: "Mod-i", run: markdown ? mdItalic : italic },
+          { key: "Mod-m", run: markdown ? mdMath(false) : insertMath(false) },
+          { key: "Mod-Shift-m", run: markdown ? mdMath(true) : insertMath(true) },
           { key: "Mod-Enter", run: () => (options.onCompile(), true) },
           { key: "Mod-s", run: () => (options.onCompile(), true) },
           { key: "Mod-Alt-p", run: () => (options.onTogglePreview(), true) },

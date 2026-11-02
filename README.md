@@ -27,6 +27,8 @@ The app updates itself: it checks for new versions on its own, and asks before r
 - **Source and Visual**: Source is plain LaTeX. Visual shows headings, math, lists and references as they'll look,
   and shows the markup again where your cursor is.
 - **PDF**: builds as you type, or with ⌘S. Errors link to their lines. Double-click the PDF to jump to the source.
+- **Markdown**: `.md` files open too, with the same Source and Visual modes and a live preview where the PDF would be.
+  Open a README.md (or a folder of Markdown) with ⌘O; nothing needs TeX.
 - **Chat** (⌘J): talk to Claude or pi about your document. The agent edits the files directly and you see its changes
   as they happen. Pick the model at the top of the chat. Select text and press **Ask** to ask about it.
 - **Synonyms**: select a word or two to see synonyms.
@@ -41,7 +43,7 @@ bun install && bun run build
 ln -s "$PWD" ~/.mirador/plugins/neo-manuscript
 ```
 
-Restart Mirador and ask its agent to open a `.tex` file in NeoManuscript. Mirador's plugin API can't switch the app
+Restart Mirador and ask its agent to open a `.tex` or `.md` file in NeoManuscript. Mirador's plugin API can't switch the app
 to another file yet, so other files in the project open read-only; **Edit** asks the agent to open them.
 
 ## Building from source

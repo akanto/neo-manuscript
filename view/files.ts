@@ -17,7 +17,7 @@ interface Folder {
   files: string[];
 }
 
-const ICONS: Record<ReturnType<typeof kindOf>, string> = { tex: "𝑇", text: "≡", image: "▣", pdf: "▤", other: "·" };
+const ICONS: Record<ReturnType<typeof kindOf>, string> = { tex: "𝑇", markdown: "M↓", text: "≡", image: "▣", pdf: "▤", other: "·" };
 const nameOf = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 const parentOf = (path: string) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "");
 const join = (folder: string, name: string) => (folder ? `${folder}/${name}` : name);

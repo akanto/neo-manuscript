@@ -70,7 +70,7 @@ async function open(path: string) {
 async function chooseProject() {
   const [chosen] = await Utils.openFileDialog({
     startingFolder: project ? dirname(project.folder) : homedir(),
-    allowedFileTypes: "tex",
+    allowedFileTypes: "tex,md,markdown",
     canChooseFiles: true,
     canChooseDirectory: true,
     allowsMultipleSelection: false,

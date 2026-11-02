@@ -3,7 +3,8 @@ import { EditorView } from "@codemirror/view";
 import type { Author, DocumentState, HostBridge, TaskState } from "../core/host-api.ts";
 import { reportNamedIn, type BuildReport, type Problem } from "../core/build.ts";
 import type { TexDocument } from "../core/document.ts";
-import { bold, code, createEditor, flashRanges, insertList, insertMath, italic, setHeading, setProblems, type Editor, type Mode } from "./editor.ts";
+import { bold, code, createEditor, flashRanges, insertList, insertMath, italic, setHeading, setProblems, type Editor, type Language, type Mode } from "./editor.ts";
+import { MarkdownPreview, mdBold, mdCode, mdHeading, mdItalic, mdList, mdMath } from "./markdown.ts";
 import { ChatPanel } from "./chat.ts";
 import { FileTree } from "./files.ts";
 import { drawFirstPage, PdfViewer, type PdfPoint, type PdfSelection } from "./pdf.ts";
@@ -12,13 +13,15 @@ import css from "./styles.css" with { type: "text" };
 import { DocumentSync, fromHost } from "./sync.ts";
 import { commentStart } from "../core/latex.ts";
 import { fileOfTag, lineForPlace, placeForLine, readSynctex, sourceForPlace, tagOf, type Synctex } from "./synctex.ts";
-import { isTextFile, kindOf, type ProjectState } from "../core/project.ts";
+import { isTextFile, kindOf, looksLikeMarkdown, type ProjectState } from "../core/project.ts";
 import { unpackThesaurus, type Thesaurus } from "./thesaurus.ts";
 import { forgetFigures, redraw, setCitations } from "./visual.ts";
 import packedThesaurus from "thesaurus:packed";
 import katexCss from "katex/dist/katex.min.css";
 
 const AUTO_COMPILE_MS = 1200;
+/** How long the text stays still before the Markdown preview draws it again. */
+const PREVIEW_MS = 150;
 const AUTHOR: Record<Author["kind"], string> = { agent: "Agent", you: "You", outside: "Outside the editor" };
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> & { dataset?: Record<string, string> } = {}, ...children: (Node | string)[]): HTMLElementTagNameMap[K] {
@@ -89,10 +92,28 @@ export function startView(host: HostBridge<TexDocument>) {
   let pendingLine: { file: string; line: number } | null = null;
   /** The last build's problems, for marking those of each file the editor opens. */
   let lastProblems: Problem[] = [];
+  /** The host's last state, to start the editor again in another language when the file turns out to be Markdown. */
+  let lastState: DocumentState<TexDocument> | null = null;
+  /** The language of the editor as it was made. */
+  let editorLanguage: Language = "latex";
+  let markdownTimer: ReturnType<typeof setTimeout> | null = null;
 
-  const run = (command: (view: EditorView) => boolean) => () => {
+  /** The file in the editor: the one the host says, or, for a host that can't (Mirador), the one its project lists as open. */
+  const editingFile = () => shownFile ?? project?.open ?? null;
+  /**
+   * A Markdown file is edited as Markdown; any other text file as LaTeX. A host that names no file (Mirador, until its
+   * listing comes) leaves the text to tell.
+   */
+  const languageOf = (file: string | null): Language => {
+    if (file !== null) return kindOf(file) === "markdown" ? "markdown" : "latex";
+    return lastState && looksLikeMarkdown(lastState.document.text) ? "markdown" : "latex";
+  };
+  const isMarkdown = () => languageOf(editingFile()) === "markdown";
+
+  /** Runs a formatting command on the editor: the LaTeX one, or the Markdown one in a Markdown file. */
+  const run = (latex: (view: EditorView) => boolean, markdown: (view: EditorView) => boolean = latex) => () => {
     if (!editor) return;
-    command(editor.view);
+    (editorLanguage === "markdown" ? markdown : latex)(editor.view);
     editor.view.focus();
   };
 
@@ -103,25 +124,39 @@ export function startView(host: HostBridge<TexDocument>) {
   const modeSwitch = element("div", { className: "segmented" }, modeButtons.source, modeButtons.visual);
   const lastChange = element("span", { className: "last-change" });
 
+  const codeButton = button("<code>T</code>", "Typewriter", run(code, mdCode));
+  const headingButtons = (["section", "subsection", "subsubsection"] as const).map((level, index) =>
+    button(`H${index + 1}`, "", run(setHeading(level), mdHeading((index + 1) as 1 | 2 | 3))),
+  );
   const editTools = element(
     "span",
     { className: "edit-tools" },
     modeSwitch,
     element("span", { className: "sep" }),
-    button("<b>B</b>", "Bold (⌘B)", run(bold)),
-    button("<i>I</i>", "Italic (⌘I)", run(italic)),
-    button("<code>T</code>", "Typewriter", run(code)),
+    button("<b>B</b>", "Bold (⌘B)", run(bold, mdBold)),
+    button("<i>I</i>", "Italic (⌘I)", run(italic, mdItalic)),
+    codeButton,
     element("span", { className: "sep" }),
-    button("H1", "Section", run(setHeading("section"))),
-    button("H2", "Subsection", run(setHeading("subsection"))),
-    button("H3", "Subsubsection", run(setHeading("subsubsection"))),
+    ...headingButtons,
     element("span", { className: "sep" }),
-    button("•≡", "Bulleted list", run(insertList("itemize"))),
-    button("1.≡", "Numbered list", run(insertList("enumerate"))),
+    button("•≡", "Bulleted list", run(insertList("itemize"), mdList(false))),
+    button("1.≡", "Numbered list", run(insertList("enumerate"), mdList(true))),
     element("span", { className: "sep" }),
-    button("<i>x</i>²", "Inline math (⌘M)", run(insertMath(false))),
-    button("∑", "Display math (⇧⌘M)", run(insertMath(true))),
+    button("<i>x</i>²", "Inline math (⌘M)", run(insertMath(false), mdMath(false))),
+    button("∑", "Display math (⇧⌘M)", run(insertMath(true), mdMath(true))),
   );
+
+  /** The buttons' names in the language of the file in the editor. */
+  function nameTools(language: Language) {
+    const markdown = language === "markdown";
+    codeButton.title = markdown ? "Code" : "Typewriter";
+    const names = markdown ? ["Heading 1", "Heading 2", "Heading 3"] : ["Section", "Subsection", "Subsubsection"];
+    headingButtons.forEach((heading, index) => (heading.title = names[index]!));
+    layoutButtons.pdf.textContent = markdown ? "Preview" : "PDF";
+    layoutButtons.pdf.title = markdown ? "Only the preview" : "Only the PDF";
+    layoutButtons.split.title = `The editor and the ${markdown ? "preview" : "PDF"} side by side (⌥⌘P)`;
+    app.dataset.language = language;
+  }
 
   // --- Layout: the editor, the PDF, or both side by side ------------------------------------------------------------
 
@@ -144,6 +179,7 @@ export function startView(host: HostBridge<TexDocument>) {
     app.dataset.layout = next;
     for (const known of LAYOUTS) layoutButtons[known].classList.toggle("on", known === next);
     if (next !== "pdf") editor?.view.requestMeasure();
+    if (next !== "editor") drawMarkdown();
     keep?.();
   }
 
@@ -152,6 +188,10 @@ export function startView(host: HostBridge<TexDocument>) {
    * Visual do: the PDF at what the top of the editor typeset, the editor at the line of what is at the top of the PDF.
    */
   function keepPlace(from: Layout, to: Layout): (() => void) | null {
+    if (editor && editorLanguage === "markdown") {
+      const line = topLine(editor.view);
+      return from === "editor" && to !== "editor" ? () => markdownPreview.scrollToLine(line) : null;
+    }
     if (!editor || !synctex) return null;
     const { data, tag } = synctex;
     if (from === "editor" && to !== "editor") {
@@ -284,7 +324,7 @@ export function startView(host: HostBridge<TexDocument>) {
     const last = state.doc.lineAt(to).number;
     const where = `${first === last ? `line ${first}` : `lines ${first}–${last}`}${shownFile ? ` of ${shownFile}` : ""}`;
     const quoted = from === to ? state.doc.line(first).text : state.sliceDoc(from, to);
-    return `${words}\n\n(At ${where}:)\n\`\`\`latex\n${quoted}\n\`\`\``;
+    return `${words}\n\n(At ${where}:)\n\`\`\`${editorLanguage}\n${quoted}\n\`\`\``;
   }
 
   /** A question about text selected in the PDF: the text as typeset, and the source lines it came from. */
@@ -305,19 +345,23 @@ export function startView(host: HostBridge<TexDocument>) {
     return `${about}\n\n(It comes from ${where} of ${shownFile ?? "the source"}:)\n\`\`\`latex\n${source}\n\`\`\``;
   }
 
-  /** Only a .tex file has a Visual mode; any other text file (a .bib, a .sty) shows as it is. */
-  const isTex = () => shownFile === null || kindOf(shownFile) === "tex";
-  const modeOfFile = () => (isTex() ? mode : "source");
+  /** Only a .tex or a Markdown file has a Visual mode; any other text file (a .bib, a .sty) shows as it is. */
+  const hasVisual = () => {
+    const file = editingFile();
+    return file === null || kindOf(file) === "tex" || kindOf(file) === "markdown";
+  };
+  const modeOfFile = () => (hasVisual() ? mode : "source");
 
   function setMode(next: Mode) {
-    if (isTex()) {
+    if (hasVisual()) {
       mode = next;
       remember("mode", next);
     }
     const shown = modeOfFile();
     modeButtons.source.classList.toggle("on", shown === "source");
     modeButtons.visual.classList.toggle("on", shown === "visual");
-    modeButtons.visual.disabled = !isTex();
+    modeButtons.source.title = editorLanguage === "markdown" ? "Edit the Markdown source" : "Edit the LaTeX source";
+    modeButtons.visual.disabled = !hasVisual();
     editor?.setMode(shown);
     editor?.view.focus();
   }
@@ -363,6 +407,8 @@ export function startView(host: HostBridge<TexDocument>) {
   // --- Preview ------------------------------------------------------------------------------------------------------
 
   const viewer = new PdfViewer();
+  /** In place of the PDF for a Markdown file: the Markdown as it reads. Its images are read beside the file. */
+  const markdownPreview = new MarkdownPreview(host.readFile ? (path) => host.readFile!(besideEditingFile(path)) : null);
   let auto = recall("auto") !== "off";
   const compileButton = button("▶ Compile", "Compile the PDF (⌘S or ⌘↵)", () => compileNow(), "primary");
   const autoBox = element("input", { type: "checkbox", checked: auto });
@@ -397,7 +443,29 @@ export function startView(host: HostBridge<TexDocument>) {
     problemsList,
     placeholder,
     viewer.element,
+    markdownPreview.element,
   );
+
+  /** Draws the Markdown in the editor in the preview, when it is in sight. */
+  function drawMarkdown() {
+    if (markdownTimer) clearTimeout(markdownTimer);
+    markdownTimer = null;
+    if (!editor || editorLanguage !== "markdown" || layout === "editor") return;
+    try {
+      markdownPreview.show(editor.view.state.doc.toString());
+    } catch (error) {
+      // Said in the pane, which would otherwise stay empty.
+      markdownPreview.element.replaceChildren(element("p", { className: "md-preview-error" }, `The preview can't be drawn: ${(error as Error).message}`));
+      console.error(error);
+    }
+  }
+
+  /** The text changed: the preview draws it again once it has stopped changing for a moment. */
+  function wantMarkdown() {
+    if (editorLanguage !== "markdown" || layout === "editor") return;
+    if (markdownTimer) clearTimeout(markdownTimer);
+    markdownTimer = setTimeout(drawMarkdown, PREVIEW_MS);
+  }
 
   viewer.onPoint = (point: PdfPoint) => {
     if (!editor) return;
@@ -423,9 +491,20 @@ export function startView(host: HostBridge<TexDocument>) {
 
   /** The file a problem is in: the one the log names, else the build's own. */
   const fileOfProblem = (problem: Problem) => problem.file ?? builtSource;
-  /** The file in the editor: the one the host says, or, for a host that can't (Mirador), the one its project lists as open. */
-  const editingFile = () => shownFile ?? project?.open ?? null;
+  /** A path as a Markdown file in the editor writes it (relative to its own folder), as a path in the project. */
+  function besideEditingFile(path: string): string {
+    const file = editingFile();
+    const parts = (file?.includes("/") ? file.slice(0, file.lastIndexOf("/") + 1) + path : path).split("/");
+    const resolved: string[] = [];
+    for (const part of parts) {
+      if (part === "..") {
+        if (resolved.pop() === undefined) throw new Error(`${path} is outside the project`);
+      } else if (part !== "." && part !== "") resolved.push(part);
+    }
+    return resolved.join("/");
+  }
   const problemsOfShownFile = () => {
+    if (editorLanguage === "markdown") return [];
     const file = editingFile();
     return file === null ? lastProblems : lastProblems.filter((problem) => fileOfProblem(problem) === file);
   };
@@ -535,9 +614,15 @@ export function startView(host: HostBridge<TexDocument>) {
   let taskRunning = false;
   let lastTask: { runId: number; state: TaskState["state"] } | null = null;
 
+  /**
+   * Whether there is a PDF to build: not for a Markdown file, which isn't part of a build, nor in a project of no LaTeX
+   * at all (a folder of Markdown).
+   */
+  const builds = () => !isMarkdown() && (project === null || project.entries.some((entry) => entry.kind === "file" && kindOf(entry.path) === "tex"));
+
   /** The text changed: compile once it has stopped changing for a moment, if Auto is on. */
   function wantCompile() {
-    if (!auto) return;
+    if (!auto || !builds()) return;
     compileWanted = true;
     if (compileTimer) clearTimeout(compileTimer);
     compileTimer = setTimeout(() => {
@@ -547,6 +632,7 @@ export function startView(host: HostBridge<TexDocument>) {
   }
 
   function compileNow() {
+    if (!builds()) return;
     compileWanted = true;
     if (compileTimer) clearTimeout(compileTimer);
     compileTimer = null;
@@ -557,6 +643,8 @@ export function startView(host: HostBridge<TexDocument>) {
   /** Compiles when it is wanted, the host has the text the editor has, and no build is running. */
   function tryCompile() {
     if (!compileWanted || compileTimer || !sync || !host.run) return;
+    // The file may have turned out to be Markdown since the build was wanted (Mirador names it late).
+    if (!builds()) return void (compileWanted = false);
     if (!sync.settled || taskRunning) return;
     compileWanted = false;
     taskRunning = true;
@@ -574,7 +662,8 @@ export function startView(host: HostBridge<TexDocument>) {
       buildStatus.textContent = task.text ?? "Compiling…";
       return;
     }
-    if (known) return;
+    // A Markdown file has no build: what a build of before says isn't about it.
+    if (known || editorLanguage === "markdown") return;
     if (task.state === "done") buildStatus.textContent = (task.summary ?? "").split("\n")[0]!.replace(/^Compiled \S+ with (\S+) to \S+: /, "$1 · ").replace(/\.$/, "");
     else buildStatus.textContent = task.state === "stopped" ? "Stopped" : "Build failed";
     buildStatus.title = task.summary ?? task.problem ?? "";
@@ -606,7 +695,7 @@ export function startView(host: HostBridge<TexDocument>) {
       if (previewing !== path) return;
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       previewUrl = null;
-      if (kind === "tex" || kind === "text") {
+      if (kind === "tex" || kind === "markdown" || kind === "text") {
         // To read: the host can't open it in the editor. Edit asks the agent to open it there.
         if (prompt) {
           preview.firstElementChild?.append(
@@ -655,6 +744,8 @@ export function startView(host: HostBridge<TexDocument>) {
     );
     host.project.onProject((state) => {
       project = state;
+      // For a host that names the file in the editor only here (Mirador), the editor follows its language.
+      if (editor && lastState && languageOf(editingFile()) !== editorLanguage) start(lastState);
       // For a host that names the file in the editor only here, problems and SyncTeX follow it.
       retag();
       editor?.view.dispatch({ effects: setProblems.of(problemsOfShownFile()) });
@@ -666,7 +757,7 @@ export function startView(host: HostBridge<TexDocument>) {
         shownFile = null;
       }
       if (state.open === null && !previewing) {
-        editorPane.replaceChildren(element("div", { className: "loading" }, state.entries.length > 0 ? "Pick a file on the left." : "This folder is empty: make a .tex file with + on the left."));
+        editorPane.replaceChildren(element("div", { className: "loading" }, state.entries.length > 0 ? "Pick a file on the left." : "This folder is empty: make a .tex or .md file with + on the left."));
       }
     });
   }
@@ -681,17 +772,22 @@ export function startView(host: HostBridge<TexDocument>) {
     editor?.view.destroy();
     const first = editor === null;
     shownFile = state.file ?? null;
+    editorLanguage = languageOf(editingFile());
+    nameTools(editorLanguage);
     hidePreview();
     editorPane.replaceChildren();
+    const markdown = editorLanguage === "markdown";
     editor = createEditor({
       parent: editorPane,
       text: state.document.text,
       mode: modeOfFile(),
-      readFile: host.readFile ? (path) => host.readFile!(path) : null,
+      language: editorLanguage,
+      readFile: host.readFile ? (path) => host.readFile!(markdown ? besideEditingFile(path) : path) : null,
       drawPdf: drawFirstPage,
       onChange: (fromUser) => {
         if (fromUser) sync?.typed();
         wantCompile();
+        wantMarkdown();
       },
       onCompile: compileNow,
       onTogglePreview: togglePreview,
@@ -719,14 +815,16 @@ export function startView(host: HostBridge<TexDocument>) {
       editor.view.dispatch({ selection: { anchor: Math.min(place.anchor, length), head: Math.min(place.head, length) } });
       const view = editor.view;
       requestAnimationFrame(() => (view.scrollDOM.scrollTop = place.scrollTop));
-    } else {
+    } else if (!markdown) {
       // Start in the body, so that Visual mode opens with the preamble folded away.
       const body = /\\begin\{document\}[^\n]*\n?/.exec(state.document.text);
       if (body) editor.view.dispatch({ selection: { anchor: body.index + body[0].length } });
     }
+    drawMarkdown();
     if (!first) return;
 
     // The last build's PDF shows at once (taskChanged reads it when the host still has its task), and a new build follows.
+    if (markdown) return;
     const report = recall("report");
     if (!state.task && report) void loadReport(report, null).catch(() => {});
     wantCompile();
@@ -734,6 +832,7 @@ export function startView(host: HostBridge<TexDocument>) {
   }
 
   host.onState((state) => {
+    lastState = state;
     showBanner(state.problem ? `The file doesn't read as it is now: ${state.problem}` : null);
     if (!editor || (state.file ?? null) !== shownFile) start(state);
     else sync?.received(state);

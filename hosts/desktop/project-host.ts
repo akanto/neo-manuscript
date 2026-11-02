@@ -5,7 +5,7 @@ import { compile } from "../../core/compile.ts";
 import { NEW_DOCUMENT, parseDocument, type TexDocument } from "../../core/document.ts";
 import type { Author, DocumentState, TaskState } from "../../core/host-api.ts";
 import { listProject } from "../../core/project-files.ts";
-import { isHidden, isProjectPath, isTextFile, kindOf, type ProjectEntry, type ProjectState } from "../../core/project.ts";
+import { firstFileOf, isHidden, isProjectPath, isTextFile, kindOf, type ProjectEntry, type ProjectState } from "../../core/project.ts";
 import { DocumentHost } from "./document-host.ts";
 
 /** How long the folder has to stay still after a change before the project is listed again. */
@@ -61,7 +61,7 @@ export class ProjectHost {
     if (!(await stat(folder)).isDirectory()) throw new Error(`${folder} isn't a folder`);
     const project = new ProjectHost(await realpath(folder), options);
     await project.list();
-    const first = [options.open, project.main].find((path): path is string => !!path && project.has(path) && isTextFile(path));
+    const first = [options.open, project.main, firstFileOf(project.entries)].find((path): path is string => !!path && project.has(path) && isTextFile(path));
     if (first) await project.openFile(first);
     project.watch();
     return project;
@@ -196,7 +196,7 @@ export class ProjectHost {
     if (open) await this.openFile(open);
   }
 
-  /** Moves a file or folder to the trash; the open file, if it goes, gives way to the main file. */
+  /** Moves a file or folder to the trash; the open file, if it goes, gives way to the main file, or another. */
   async remove(path: string) {
     const gone = (other: string) => other === path || other.startsWith(`${path}/`);
     for (const [other, document] of [...this.documents]) {
@@ -210,7 +210,8 @@ export class ProjectHost {
     if (this.openPath && gone(this.openPath)) {
       this.stopListening?.();
       this.openPath = null;
-      if (this.main) await this.openFile(this.main);
+      const next = this.main ?? firstFileOf(this.entries);
+      if (next) await this.openFile(next);
       else this.stateChanged();
     }
   }

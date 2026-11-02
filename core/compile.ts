@@ -28,9 +28,9 @@ export interface CompileContext {
   signal: AbortSignal;
 }
 
-/** The .tex file in the document's folder that holds the document, as the task doesn't get told which file it is. */
-export async function sourceFileOf(folder: string, document: TexDocument): Promise<string | null> {
-  const names = (await readdir(folder)).filter((name) => name.endsWith(".tex")).sort();
+/** The .tex file (or a file of another of `extensions`) in the document's folder that holds the document, as the task isn't told which file it is. */
+export async function sourceFileOf(folder: string, document: TexDocument, extensions = [".tex"]): Promise<string | null> {
+  const names = (await readdir(folder)).filter((name) => extensions.some((extension) => name.endsWith(extension))).sort();
   for (const name of names) {
     const text = await readFile(join(folder, name), "utf8").catch(() => null);
     if (text !== null && parseDocument(text).text === document.text) return name;

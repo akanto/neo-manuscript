@@ -4,7 +4,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, relative, sep } from "node:path";
 import type { ChatEvent, ChatImage, PastChat } from "../../core/chat.ts";
 import type { Author } from "../../core/host-api.ts";
-import { isTextFile } from "../../core/project.ts";
+import { isTextFile, kindOf } from "../../core/project.ts";
 import { agentCommand, agents, type AgentId } from "./agents.ts";
 import type { ProjectHost } from "./project-host.ts";
 
@@ -224,6 +224,17 @@ export class ChatSession {
     const { project } = this.options;
     const state = project.projectState();
     const build = 'curl -s -X POST "$NEO_MANUSCRIPT_URL/agent/compile" -H "x-token: $NEO_MANUSCRIPT_TOKEN"';
+    // A folder of Markdown and no LaTeX has nothing to build.
+    if (!state.entries.some((entry) => entry.kind === "file" && kindOf(entry.path) === "tex")) {
+      return [
+        "<context>",
+        "You are helping the user write Markdown in NeoManuscript, an editor that shows Markdown as text or as it reads.",
+        `The project is the folder ${project.folder} (your working folder).`,
+        state.open ? `The user has ${state.open} open in the editor.` : "",
+        "Change the project's files with your own tools; the user sees each change in the editor at once, so keep changes to what was asked.",
+        "</context>",
+      ].filter(Boolean).join("\n");
+    }
     return [
       "<context>",
       "You are helping the user write a LaTeX document in NeoManuscript, an editor that shows the source and the typeset PDF side by side.",

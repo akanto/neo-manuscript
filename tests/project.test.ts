@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { findMainFile, isProjectPath, kindOf, rootNamedIn, startsDocument } from "../core/project.ts";
+import { findMainFile, firstFileOf, isProjectPath, isTextFile, kindOf, looksLikeMarkdown, rootNamedIn, startsDocument } from "../core/project.ts";
 
 const DOCUMENT = "\\documentclass{article}\n\\begin{document}\nHi.\n\\end{document}\n";
 const CHAPTER = "\\chapter{Intro}\nText.\n";
@@ -48,9 +48,29 @@ test("file kinds", () => {
   expect(kindOf("fig/plot.PNG")).toBe("image");
   expect(kindOf("fig/plot.pdf")).toBe("pdf");
   expect(kindOf("data.xlsx")).toBe("other");
+  expect(kindOf("README.md")).toBe("markdown");
+  expect(kindOf("notes/a.markdown")).toBe("markdown");
+  expect(isTextFile("README.md")).toBe(true);
+});
+
+test("a project with no main file opens its README, else its first Markdown or text file", () => {
+  const files = (...paths: string[]) => paths.map((path) => ({ path, kind: "file" as const }));
+  expect(firstFileOf(files("a.md", "docs/README.md", "Readme.MD", "index.md"))).toBe("Readme.MD");
+  expect(firstFileOf(files("b.md", "index.md"))).toBe("index.md");
+  expect(firstFileOf(files("notes.txt", "b.md", "a.md"))).toBe("a.md");
+  expect(firstFileOf(files("logo.png", "notes.txt"))).toBe("notes.txt");
+  expect(firstFileOf(files("logo.png", "docs/a.md"))).toBeNull();
 });
 
 test("paths stay inside the project", () => {
   expect(isProjectPath("chapters/intro.tex")).toBe(true);
   for (const path of ["", "/etc/passwd", "../x.tex", "a/../../x", "a//b", "./a", "C:/x", "a\\b"]) expect(isProjectPath(path)).toBe(false);
+});
+
+test("a text reads as Markdown by its structure, unless it has LaTeX's", async () => {
+  expect(looksLikeMarkdown(await Bun.file(new URL("../README.md", import.meta.url)).text())).toBe(true);
+  expect(looksLikeMarkdown("# Title\n\nSome *text* and `\\section` in code.\n\n```tex\n\\begin{document}\n```\n")).toBe(true);
+  expect(looksLikeMarkdown(await Bun.file(new URL("../examples/paper.tex", import.meta.url)).text())).toBe(false);
+  expect(looksLikeMarkdown("\\section{Intro}\n- not a list in LaTeX, but LaTeX's commands win\n")).toBe(false);
+  expect(looksLikeMarkdown("Plain words only.")).toBe(false);
 });

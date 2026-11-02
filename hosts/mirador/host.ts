@@ -5,7 +5,7 @@ import { describeDocument } from "../../core/describe.ts";
 import { NEW_DOCUMENT, parseDocument, serializeDocument, type TexDocument } from "../../core/document.ts";
 import { applyOperation, parseOperation } from "../../core/ops.ts";
 import { listProject, PROJECT_LISTING } from "../../core/project-files.ts";
-import { startsDocument, type ProjectState } from "../../core/project.ts";
+import { kindOf, looksLikeMarkdown, startsDocument, type ProjectState } from "../../core/project.ts";
 import type { AppHost } from "./api.ts";
 
 /**
@@ -15,7 +15,7 @@ import type { AppHost } from "./api.ts";
 async function writeListing(context: CompileContext): Promise<ProjectState> {
   const folder = context.documentFolder;
   const { entries, main } = await listProject(folder);
-  const listing: ProjectState = { name: basename(folder), entries, main, open: await sourceFileOf(folder, context.document) };
+  const listing: ProjectState = { name: basename(folder), entries, main, open: await sourceFileOf(folder, context.document, [".tex", ".md", ".markdown"]) };
   const path = join(folder, PROJECT_LISTING);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(listing)}\n`);
@@ -25,6 +25,9 @@ async function writeListing(context: CompileContext): Promise<ProjectState> {
 /** Builds the document, or the project's main file when the document is a part of it (a chapter), and lists the files. */
 async function build(context: CompileContext): Promise<string> {
   try {
+    // A Markdown file isn't built: the view renders it.
+    const file = await sourceFileOf(context.documentFolder, context.document, [".tex", ".md", ".markdown"]);
+    if (file ? kindOf(file) === "markdown" : looksLikeMarkdown(context.document.text)) return `${file ?? "The document"} is Markdown: there is nothing to build.`;
     if (startsDocument(context.document.text)) return await compile(context);
     const { main } = await listProject(context.documentFolder);
     return await compile(main ? { ...context, source: main } : context);
