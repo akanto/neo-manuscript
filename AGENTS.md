@@ -15,6 +15,7 @@ bun run app:build        # stable build: build/ and artifacts/ (DMG, update file
 bun run build            # the Mirador plugin's view: dist/view.js
 bun run harness          # Mirador stand-in at http://127.0.0.1:4810 on examples/paper.tex
 bun hosts/desktop/serve.ts <folder>   # the desktop app's server alone, to use the view in a browser
+bun run screenshots      # screenshots/*.png for Mirador's plugin store, from the harness in Chrome
 ```
 
 `electrobun dev` and `electrobun build` share a lock: stop a running dev app before a stable build.
@@ -86,7 +87,7 @@ latexmk), then runs the typecheck, the unit tests and `bun run e2e` in the runne
 
 ## Releasing
 
-Bump `version` in `package.json`, commit, and push a matching tag: `git tag v0.2.0 && git push origin main v0.2.0`.
+Bump `version` in `package.json` and `plugin.json` (Mirador's plugin store installs the plugin at the tag and checks it), commit, and push a matching tag: `git tag v0.2.0 && git push origin main v0.2.0`.
 `.github/workflows/release.yml` builds on macOS and publishes the DMG and update files as the latest release. To try
 an update locally, build two versions with `NEO_RELEASE_BASE_URL=http://127.0.0.1:8765` and serve the newer one's
 `artifacts/` there while the older one runs.

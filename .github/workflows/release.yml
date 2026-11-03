@@ -20,13 +20,16 @@ jobs:
         with:
           bun-version: 1.4.4
 
-      - name: The tag is package.json's version
+      # Mirador's plugin store installs the plugin at the tag, and checks that plugin.json's version is the tag's.
+      - name: The tag is package.json's and plugin.json's version
         run: |
-          version="v$(jq -r .version package.json)"
-          if [ "$version" != "$GITHUB_REF_NAME" ]; then
-            echo "The tag $GITHUB_REF_NAME isn't package.json's version, $version." >&2
-            exit 1
-          fi
+          for file in package.json plugin.json; do
+            version="v$(jq -r .version "$file")"
+            if [ "$version" != "$GITHUB_REF_NAME" ]; then
+              echo "The tag $GITHUB_REF_NAME isn't $file's version, $version." >&2
+              exit 1
+            fi
+          done
 
       - run: bun install --frozen-lockfile
       # Electrobun's SDK, which the typecheck reads and the build uses, comes from its own toolchain, not from npm.
@@ -45,5 +48,6 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" artifacts/* \
             --title "NeoManuscript ${GITHUB_REF_NAME#v}" \
+            --notes "To install, download **macos-arm64-NeoManuscript.dmg**. The other files are for the app's automatic updates." \
             --generate-notes \
             --latest

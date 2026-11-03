@@ -1,6 +1,6 @@
 {
   "name": "neo-manuscript",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,7 +11,8 @@
     "harness": "bun run build && bun e2e/harness.ts",
     "app": "electrobun dev",
     "app:prepare": "electrobun prepare",
-    "app:build": "electrobun build --env=stable"
+    "app:build": "electrobun build --env=stable",
+    "screenshots": "bun run build && bun scripts/screenshots.ts"
   },
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "^0.99.1",
