@@ -1,0 +1,68 @@
+# Checks every push to main and every pull request: the typecheck, the unit tests and the end-to-end tests with real
+# TeX (Tectonic and BasicTeX's latexmk), and a stable build of the desktop app, kept as a workflow artifact.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: TeX
+        run: |
+          brew install tectonic
+          brew install --cask basictex
+          echo /Library/TeX/texbin >> "$GITHUB_PATH"
+          sudo /Library/TeX/texbin/tlmgr update --self
+          sudo /Library/TeX/texbin/tlmgr install latexmk
+
+      # The packages Tectonic fetches on its first build.
+      - uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/Tectonic
+          key: tectonic-${{ runner.os }}-${{ hashFiles('examples/**', 'tests/**', 'e2e/**') }}
+          restore-keys: tectonic-${{ runner.os }}-
+
+      - run: bun install --frozen-lockfile
+      # Electrobun's SDK, which the typecheck reads, comes from its own toolchain, not from npm.
+      - run: bun run app:prepare
+      - run: bun run typecheck
+      - run: bun test tests
+      # Builds the Mirador plugin's view, then runs it in the runner's Chrome.
+      - run: bun run e2e
+
+  app:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - run: bun install --frozen-lockfile
+      - run: bun run app:prepare
+      - run: bun run app:build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NeoManuscript-${{ github.sha }}
+          path: artifacts/*.dmg
+          retention-days: 7

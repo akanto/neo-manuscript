@@ -77,6 +77,12 @@ bun hosts/desktop/serve.ts <folder>   # the desktop app's server alone, to use t
   the launcher Electrobun 2.0.5 leaves behind on the first start, which otherwise stops the app from relaunching after
   an update.
 
+## CI
+
+`.github/workflows/ci.yml` runs on pushes to main and on pull requests. One job installs Tectonic and BasicTeX (with
+latexmk), then runs the typecheck, the unit tests and `bun run e2e` in the runner's Chrome. The other runs a stable
+`app:build` and keeps the DMG as a workflow artifact for 7 days.
+
 ## Releasing
 
 Bump `version` in `package.json`, commit, and push a matching tag: `git tag v0.2.0 && git push origin main v0.2.0`.
