@@ -502,18 +502,23 @@ export function startView(host: HostBridge<TexDocument>) {
   const buildStatus = element("span", { className: "build-status" });
 
   /**
-   * The engine the main file asks for, kept as its `% !TEX program` line, so that it goes with the file. Tectonic is
-   * the default and takes the line out; latexmk (MacTeX's) writes it. Another engine a file names shows while it does.
+   * The engine the main file asks for, kept as its `% !TEX program` line, so that it goes with the file. Auto takes the
+   * line out: latexmk when it is installed, else Tectonic. latexmk and Tectonic write it. Another engine a file names
+   * shows while it does.
    */
   const ENGINE_NAMES: Record<Engine, string> = { latexmk: "latexmk (MacTeX)", pdflatex: "pdfLaTeX", xelatex: "XeLaTeX", lualatex: "LuaLaTeX", tectonic: "Tectonic" };
   const engineMenu = element("select", { className: "engine-menu" });
   const engineOption = (value: string, label: string, title = "") => element("option", { value, title }, label);
+  const autoOption = engineOption("", "Auto", "latexmk when MacTeX is installed, else Tectonic; no line in the file");
   const latexmkOption = engineOption("latexmk", ENGINE_NAMES.latexmk, "MacTeX's full TeX Live: every package, shell escape (minted), Biber, no network");
+  const tectonicOption = engineOption("tectonic", ENGINE_NAMES.tectonic, "Fetches the packages a document needs; downloaded on the first build when it isn't installed");
   /** The option for an engine the file names that the menu doesn't offer, while it names it. */
   const otherOption = engineOption("other", "");
-  engineMenu.append(engineOption("", ENGINE_NAMES.tectonic, "Fetches the packages a document needs; downloaded on the first build when it isn't installed"), latexmkOption);
+  engineMenu.append(autoOption, latexmkOption, tectonicOption);
   void host.engines?.().then((installed) => {
-    if (installed.includes("latexmk")) return;
+    const haveLatexmk = installed.includes("latexmk");
+    autoOption.textContent = `Auto: ${haveLatexmk ? "latexmk" : "Tectonic"}`;
+    if (haveLatexmk) return;
     latexmkOption.disabled = true;
     latexmkOption.textContent = `${ENGINE_NAMES.latexmk}: not installed`;
   });
@@ -528,7 +533,7 @@ export function startView(host: HostBridge<TexDocument>) {
       engineMenu.value = "other";
     } else {
       otherOption.remove();
-      engineMenu.value = asked === "latexmk" ? "latexmk" : "";
+      engineMenu.value = asked ?? "";
     }
     const main = editingMain();
     engineMenu.disabled = !main || !builds();
@@ -537,7 +542,7 @@ export function startView(host: HostBridge<TexDocument>) {
   engineMenu.addEventListener("change", () => {
     if (!editor || !editingMain()) return;
     if (engineMenu.value === "other") return;
-    const engine = engineMenu.value === "latexmk" ? "latexmk" : null;
+    const engine = engineMenu.value === "latexmk" || engineMenu.value === "tectonic" ? engineMenu.value : null;
     const change = engineChange(editor.view.state.doc.toString(), engine);
     if (change) editor.view.dispatch({ changes: change, userEvent: "input" });
     compileNow();

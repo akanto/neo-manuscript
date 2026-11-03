@@ -67,8 +67,9 @@ interface Plan {
 }
 
 /**
- * How to build the file: with Tectonic, unless its `% !TEX program` line asks for another engine. latexmk runs the
- * engine asked for (pdflatex for `latexmk`); without latexmk, a plain engine runs with BibTeX or Biber between passes.
+ * How to build the file. Its `% !TEX program` line names the engine; without one, latexmk builds when it is installed,
+ * else Tectonic (downloaded when it isn't installed either). latexmk runs the engine asked for (pdflatex for `latexmk`);
+ * without latexmk, a plain engine runs with BibTeX or Biber between passes.
  */
 export function planBuild(text: string, file: string, found: (command: string) => string | null = findProgram): Plan {
   const asked = engineAskedFor(text);
@@ -91,13 +92,22 @@ export function planBuild(text: string, file: string, found: (command: string) =
     new TexMissing(
       `${what} isn't installed (looked on the PATH and in ${TEX_DIRS.join(", ")}). ${
         tectonicWouldDo
-          ? 'Install Tectonic (brew install tectonic), or MacTeX (brew install --cask mactex-no-gui) and build with latexmk: put "% !TEX program = latexmk" at the top of the file.'
-          : 'Install MacTeX or TeX Live (brew install --cask mactex-no-gui), or build with Tectonic: take the "% !TEX program" line out of the file.'
+          ? "Install MacTeX (brew install --cask mactex-no-gui) to build with latexmk, or Tectonic (brew install tectonic)."
+          : 'Install MacTeX or TeX Live (brew install --cask mactex-no-gui), or build with Tectonic: put "% !TEX program = tectonic" at the top of the file instead.'
       }`,
       tectonicWouldDo,
     );
 
-  if (asked === null || asked === "tectonic") {
+  if (asked === null) {
+    const latexmkPath = found("latexmk");
+    if (latexmkPath) return latexmk(latexmkPath, "pdflatex");
+    const tectonicPath = found("tectonic");
+    if (tectonicPath) return tectonic(tectonicPath);
+    const pdflatexPath = found("pdflatex");
+    if (pdflatexPath) return plain("pdflatex", pdflatexPath);
+    throw missing("TeX", true);
+  }
+  if (asked === "tectonic") {
     const path = found("tectonic");
     if (!path) throw missing("tectonic", true);
     return tectonic(path);

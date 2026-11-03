@@ -16,7 +16,7 @@ export function describeDocument({ text, eol }: TexDocument, compileWith: string
   const outline = outlineOf(text);
   const head = [
     `A LaTeX document of ${lines.length} lines${eol === "\r\n" ? " (CRLF line breaks in the file; positions count each as one character)" : ""}.`,
-    `Class: ${documentClassOf(text) ?? "none found"}. Engine: ${engineAskedFor(text) ?? "default (tectonic); a \"% !TEX program = latexmk\" line at the top builds with MacTeX's latexmk instead"}.`,
+    `Class: ${documentClassOf(text) ?? "none found"}. Engine: ${engineAskedFor(text) ?? "default (latexmk when MacTeX is installed, else Tectonic); a \"% !TEX program = latexmk\" or \"% !TEX program = tectonic\" line at the top chooses one"}.`,
     "The user edits the same text in the app's Source and Visual modes, and sees the compiled PDF beside it.",
   ];
   const outlined = outline.length === 0

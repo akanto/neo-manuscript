@@ -42,17 +42,18 @@ bun hosts/desktop/serve.ts <folder>   # the desktop app's server alone, to use t
 
 ## How things work
 
-- **Build engine**: Tectonic, unless a `% !TEX program = …` line names another: `latexmk` runs latexmk with pdflatex,
-  and `pdflatex`/`xelatex`/`lualatex` run through latexmk, else the plain engine with BibTeX or Biber between passes.
+- **Build engine**: a `% !TEX program = …` line names it: `tectonic`, `latexmk` (latexmk with pdflatex), or
+  `pdflatex`/`xelatex`/`lualatex` through latexmk, else the plain engine with BibTeX or Biber between passes. Without
+  the line, latexmk builds when it is installed, else an installed Tectonic, else pdflatex, else a downloaded Tectonic.
   Tectonic runs with `--keep-intermediates`, as the view reads citations from the `.aux`. Output goes to
   `.latex-build/`, with a `<job>.report.json` the view reads. TeX is also looked for in `/Library/TeX/texbin`,
-  `/opt/homebrew/bin` and `/usr/local/bin`, as apps started from the Dock don't get the shell's PATH. With no Tectonic
-  installed, `compile()` downloads the pinned one (`core/tectonic.ts`, sha256-checked by `core/downloads.ts`) on the
+  `/opt/homebrew/bin` and `/usr/local/bin`, as apps started from the Dock don't get the shell's PATH. When the build
+  needs Tectonic and none is installed, `compile()` downloads the pinned one (`core/tectonic.ts`, sha256-checked by `core/downloads.ts`) on the
   first build and keeps it in the tools folder (`~/Library/Application Support/NeoManuscript/tools` on macOS,
   `NEO_TOOLS_DIR` overrides it). While it downloads, and while Tectonic fetches packages for its first build, the build's
-  progress text is one of `core/build.ts`'s, and the view shows it over the PDF. The view's engine menu (Tectonic, or
-  latexmk) writes or takes out the `% !TEX program` line (`engineChange` in `core/latex.ts`) in the main file, and greys
-  out latexmk when the host's `engines()` doesn't list it (the desktop app's `/engines`; Mirador's view can't tell).
+  progress text is one of `core/build.ts`'s, and the view shows it over the PDF. The view's engine menu (Auto, latexmk
+  or Tectonic) writes or takes out the `% !TEX program` line (`engineChange` in `core/latex.ts`) in the main file, names
+  what Auto builds with, and greys out latexmk when the host's `engines()` doesn't list it (the desktop app's `/engines`; Mirador's view can't tell).
 - **Markdown**: `.md` and `.markdown` files are edited as Markdown and don't build; the preview pane renders them.
   A folder with no main file opens its README.md, else index.md, else its first Markdown file. A project with no
   `.tex` file at all doesn't build, and the agent is told it is Markdown.

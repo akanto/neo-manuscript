@@ -20,8 +20,8 @@ and drag NeoManuscript to Applications. The app isn't signed yet, so the first t
   (usually `main.tex`) is the one that gets built.
 - **Source and Visual**: Source is plain LaTeX. Visual shows headings, math, lists and references as they'll look,
   and shows the markup again where your cursor is.
-- **Engine**: the menu next to **Compile**. Tectonic builds by default; choose **latexmk** to build with MacTeX
-  (see [TeX: Tectonic or MacTeX](#tex-tectonic-or-mactex)).
+- **Engine**: the menu next to **Compile**. **Auto** builds with MacTeX's latexmk when it's installed, else with
+  Tectonic; choose **latexmk** or **Tectonic** to fix it for the file (see [TeX: MacTeX or Tectonic](#tex-mactex-or-tectonic)).
 - **PDF**: builds as you type, or with ⌘S. Errors link to their lines. Double-click the PDF to jump to the source.
   With ⇅ on (by default), the PDF, or a Markdown file's preview, scrolls along with the editor.
 - **Markdown**: `.md` files open too, with the same Source and Visual modes and a live preview where the PDF would be.
@@ -34,23 +34,24 @@ Shortcuts: ⌘B bold, ⌘I italic, ⌘M inline math, ⇧⌘M display math, ⌥�
 
 ## Advanced
 
-### TeX: Tectonic or MacTeX
+### TeX: MacTeX or Tectonic
 
-The PDF is built with [Tectonic](https://tectonic-typesetting.github.io/) unless you choose otherwise. If it isn't
-installed, the app downloads it on the first build. That build is slow, as Tectonic also fetches the TeX packages
-the document uses; the PDF pane says so while it works. Later builds are quick and only fetch new packages.
+With MacTeX installed, the PDF is built with latexmk. Without it, it's built with
+[Tectonic](https://tectonic-typesetting.github.io/), which the app downloads on the first build if it isn't installed.
+That build is slow, as Tectonic also fetches the TeX packages the document uses; the PDF pane says so while it works.
+Later builds are quick and only fetch new packages.
 
-Choose **latexmk** in the engine menu to build with [MacTeX](https://www.tug.org/mactex/), the full TeX Live. It makes
-sense when a document needs:
+[MacTeX](https://www.tug.org/mactex/) is the full TeX Live, and is worth installing when a document needs:
 
 - `minted` or anything else that runs programs during the build (shell escape);
 - Biber setups Tectonic doesn't handle, or a package Tectonic's bundle doesn't have;
 - builds with no network at all;
 - the same TeX as your co-authors or a journal that uses TeX Live.
 
-latexmk runs pdfLaTeX, BibTeX or Biber, and pdfLaTeX again as many times as the references need. The choice is kept
-as a `% !TEX program = latexmk` line at the top of the main file, so it goes with the file; TeXShop and VS Code read
-it too. A line naming `xelatex` or `lualatex` builds with that engine through latexmk.
+latexmk runs pdfLaTeX, BibTeX or Biber, and pdfLaTeX again as many times as the references need. To fix the engine
+for one file, choose **latexmk** or **Tectonic** in the menu: the choice is kept as a `% !TEX program = latexmk` (or
+`tectonic`) line at the top of the main file, so it goes with the file; TeXShop and VS Code read it too. **Auto**
+takes the line out. A line naming `xelatex` or `lualatex` builds with that engine through latexmk.
 
 To install MacTeX, run `brew install --cask mactex-no-gui` (about 6 GB), or download `MacTeX.pkg` from
 [tug.org/mactex](https://www.tug.org/mactex/). For a smaller install, use BasicTeX (`brew install --cask basictex`),

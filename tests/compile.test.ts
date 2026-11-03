@@ -11,8 +11,13 @@ describe("planBuild", () => {
   const all = (command: string) => `/bin/${command}`;
   const only = (...names: string[]) => (command: string) => (names.includes(command) ? `/bin/${command}` : null);
 
-  test("builds with Tectonic unless the file asks for another engine", () => {
-    expect(planBuild("x", "a.tex", all).engine).toBe("tectonic");
+  test("builds with latexmk by default, else Tectonic, else pdfLaTeX", () => {
+    expect(planBuild("x", "a.tex", all).command.slice(0, 2)).toEqual(["/bin/latexmk", "-pdf"]);
+    expect(planBuild("x", "a.tex", only("tectonic", "pdflatex")).engine).toBe("tectonic");
+    expect(planBuild("x", "a.tex", only("pdflatex")).engine).toBe("pdflatex");
+  });
+
+  test("builds with Tectonic when the file asks for it, though latexmk is installed", () => {
     expect(planBuild("% !TeX TS-program = tectonic\n", "a.tex", all).engine).toBe("tectonic");
   });
 
@@ -26,7 +31,7 @@ describe("planBuild", () => {
   });
 
   test("says how to install what is missing", () => {
-    expect(() => planBuild("x", "a.tex", only())).toThrow(/Install Tectonic/);
+    expect(() => planBuild("x", "a.tex", only())).toThrow(/Install MacTeX .* or Tectonic/);
     expect(() => planBuild("% !TEX program = latexmk\nx", "a.tex", only("tectonic"))).toThrow(/Install MacTeX or TeX Live/);
   });
 
