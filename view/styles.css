@@ -31,6 +31,7 @@ button { font: inherit; color: inherit; }
 .toolbar, .preview-bar { display: flex; align-items: center; gap: 2px; padding: 4px 6px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; min-height: 34px; }
 .toolbar button, .preview-bar button { border: 1px solid transparent; background: none; border-radius: 5px; padding: 3px 7px; min-width: 26px; cursor: pointer; line-height: 1.2; }
 .toolbar button:hover, .preview-bar button:hover:not(:disabled) { background: var(--hover); }
+.preview-bar .engine-menu { margin: 0 4px; font: inherit; font-size: 12px; }
 .toolbar button code { font-family: var(--mono); }
 .preview-bar button.primary { border-color: var(--line); background: var(--bg); }
 button:disabled { opacity: 0.5; cursor: default; }
@@ -123,6 +124,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .chat-permission button.chosen { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .chat-note { font-size: 12px; color: var(--muted); }
 .chat-note.error { color: var(--error); white-space: pre-wrap; }
+.chat-sign-in { margin-left: 6px; }
 .chat-muted { color: var(--muted); }
 .chat-status { padding: 0 10px; font-size: 12px; color: var(--muted); min-height: 0; }
 .chat-status:not(:empty) { padding: 4px 10px; }
@@ -168,6 +170,8 @@ button:disabled { opacity: 0.5; cursor: default; }
 .build-badge[hidden] { display: none; }
 .loading, .pdf-empty { padding: 24px; color: var(--muted); }
 .pdf-empty[hidden] { display: none; }
+.pdf-notice { margin: 8px; padding: 10px 12px; border-radius: 6px; background: var(--hover); font-size: 13px; }
+.pdf-notice[hidden] { display: none; }
 /* A Markdown file has no build: its preview takes the PDF's place, and the build's controls go. */
 .app[data-language="markdown"] .preview-pane > :not(.md-preview), .app[data-language="markdown"] .build-badge { display: none !important; }
 .app:not([data-language="markdown"]) .md-preview { display: none; }

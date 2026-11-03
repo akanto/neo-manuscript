@@ -27,7 +27,7 @@ export interface PastChat {
 
 export type ChatEvent =
   | { type: "agents"; agents: AgentChoice[]; current: string }
-  | { type: "status"; state: "starting" | "ready" | "working" | "failed" | "closed"; message?: string }
+  | { type: "status"; state: "starting" | "ready" | "working" | "failed" | "closed" | "signed-out" | "signing-in"; message?: string }
   | { type: "config"; options: SessionConfigOption[] }
   | { type: "user"; text: string; images?: ChatImage[] }
   | { type: "update"; update: SessionUpdate }

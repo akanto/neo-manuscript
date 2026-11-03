@@ -2,8 +2,10 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, delimiter, join } from "node:path";
 import { parseDocument, serializeDocument, type TexDocument } from "./document.ts";
-import { engineAskedFor, type Engine } from "./latex.ts";
-import { BUILD_FOLDER, type BuildReport, type Problem, reportPath } from "./build.ts";
+import { ENGINES, engineAskedFor, type Engine } from "./latex.ts";
+import { BUILD_FOLDER, type BuildReport, DOWNLOADING_TECTONIC, FIRST_TECTONIC_BUILD, type Problem, reportPath } from "./build.ts";
+import { downloadProgram } from "./downloads.ts";
+import { downloadedTectonic, tectonicDownload, tectonicHasPackages } from "./tectonic.ts";
 
 /** Where TeX is often installed, which an app started from the Dock doesn't have on its PATH. */
 const TEX_DIRS = ["/Library/TeX/texbin", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/usr/texbin"];
@@ -14,6 +16,25 @@ export function searchPath(): string {
 }
 
 const which = (command: string) => Bun.which(command, { PATH: searchPath() });
+
+/** An installed program, else (for Tectonic) the one downloaded earlier. */
+const findProgram = (command: string) => which(command) ?? (command === "tectonic" ? downloadedTectonic() : null);
+
+/** The engines this machine can build with: those installed, and Tectonic when it is installed or can be downloaded. */
+export function installedEngines(): Engine[] {
+  return ENGINES.filter((engine) => findProgram(engine) !== null || (engine === "tectonic" && tectonicDownload() !== null));
+}
+
+/** No TeX was found. `tectonicWouldDo` says whether a downloaded Tectonic could build the file. */
+export class TexMissing extends Error {
+  constructor(
+    message: string,
+    readonly tectonicWouldDo: boolean,
+  ) {
+    super(message);
+    this.name = "TexMissing";
+  }
+}
 
 /** What a build needs from its host. Mirador's task context is one, as it is. */
 export interface CompileContext {
@@ -45,8 +66,11 @@ interface Plan {
   rerun: boolean;
 }
 
-/** How to build the file: what its `% !TEX program` asks for, else latexmk, else pdflatex, else tectonic. */
-export function planBuild(text: string, file: string, found: (command: string) => string | null = which): Plan {
+/**
+ * How to build the file: with Tectonic, unless its `% !TEX program` line asks for another engine. latexmk runs the
+ * engine asked for (pdflatex for `latexmk`); without latexmk, a plain engine runs with BibTeX or Biber between passes.
+ */
+export function planBuild(text: string, file: string, found: (command: string) => string | null = findProgram): Plan {
   const asked = engineAskedFor(text);
   const plain = (engine: "pdflatex" | "xelatex" | "lualatex", path: string): Plan => ({
     engine,
@@ -60,26 +84,31 @@ export function planBuild(text: string, file: string, found: (command: string) =
   });
   const tectonic = (path: string): Plan => ({
     engine: "tectonic",
-    command: [path, "-X", "compile", file, "--outdir", BUILD_FOLDER, "--synctex", "--keep-logs"],
+    command: [path, "-X", "compile", file, "--outdir", BUILD_FOLDER, "--synctex", "--keep-logs", "--keep-intermediates", "-Z", "continue-on-errors"],
     rerun: false,
   });
-  const missing = (what: string) =>
-    new Error(`${what} isn't installed (looked on the PATH and in ${TEX_DIRS.join(", ")}). Install MacTeX or TeX Live, or Tectonic (brew install tectonic), or name another engine with a "% !TEX program = ..." line at the top of the file.`);
+  const missing = (what: string, tectonicWouldDo: boolean) =>
+    new TexMissing(
+      `${what} isn't installed (looked on the PATH and in ${TEX_DIRS.join(", ")}). ${
+        tectonicWouldDo
+          ? 'Install Tectonic (brew install tectonic), or MacTeX (brew install --cask mactex-no-gui) and build with latexmk: put "% !TEX program = latexmk" at the top of the file.'
+          : 'Install MacTeX or TeX Live (brew install --cask mactex-no-gui), or build with Tectonic: take the "% !TEX program" line out of the file.'
+      }`,
+      tectonicWouldDo,
+    );
 
-  if (asked === "tectonic") {
+  if (asked === null || asked === "tectonic") {
     const path = found("tectonic");
-    if (!path) throw missing("tectonic");
+    if (!path) throw missing("tectonic", true);
     return tectonic(path);
   }
-  const engine = asked === null || asked === "latexmk" ? "pdflatex" : asked;
+  const engine = asked === "latexmk" ? "pdflatex" : asked;
   const latexmkPath = found("latexmk");
   if (latexmkPath) return latexmk(latexmkPath, engine);
-  if (asked === "latexmk") throw missing("latexmk");
+  if (asked === "latexmk") throw missing("latexmk", false);
   const enginePath = found(engine);
   if (enginePath) return plain(engine, enginePath);
-  const tectonicPath = asked === null ? found("tectonic") : null;
-  if (tectonicPath) return tectonic(tectonicPath);
-  throw missing(engine);
+  throw missing(engine, false);
 }
 
 const MAX_RUNS = 3;
@@ -146,7 +175,9 @@ export function problemsIn(log: string): Problem[] {
       add({ severity: "warning", file: null, line: onLine ? Number(onLine[1]) : null, message: `${who ? `${who}: ` : ""}${message.replace(/\s*on input line \d+\.?/, "").trim()}` });
     }
   });
-  return problems;
+  // Tectonic says an error in its output with the file, and the log says it again without: the one with the file stays.
+  const same = (a: Problem, b: Problem) => a.severity === b.severity && a.line === b.line && a.message.replace(/\.$/, "") === b.message.replace(/\.$/, "");
+  return problems.filter((problem) => problem.file !== null || !problems.some((other) => other.file !== null && same(problem, other)));
 }
 
 /**
@@ -240,6 +271,36 @@ export function isUpToDate(engine: Engine, code: number, output: string): boolea
 
 const count = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
 
+/** Plans the build; with no TeX on the machine, downloads Tectonic first when it would do. */
+async function planWithDownload(text: string, file: string, context: CompileContext): Promise<Plan> {
+  try {
+    return planBuild(text, file);
+  } catch (error) {
+    if (!(error instanceof TexMissing) || !error.tectonicWouldDo) throw error;
+    const download = tectonicDownload();
+    if (!download) throw new TexMissing(`${error.message} (Tectonic has no download for ${process.platform} ${process.arch}.)`, false);
+    context.progress(null, `${DOWNLOADING_TECTONIC}…`);
+    let shown: number | null = -1;
+    try {
+      const path = await downloadProgram(download, {
+        signal: context.signal,
+        progress: (share) => {
+          // A step for each percent, not for each piece received.
+          const percent = share === null ? null : Math.round(share * 100);
+          if (percent !== null && percent === shown) return;
+          shown = percent;
+          context.progress(share, `${DOWNLOADING_TECTONIC}${percent === null ? "…" : ` (${percent}%)…`}`);
+        },
+      });
+      return planBuild(text, file, (command) => (command === "tectonic" ? path : null));
+    } catch (failure) {
+      if (context.signal.aborted) throw new Error("The build was stopped.");
+      const reason = failure instanceof Error ? failure.message : String(failure);
+      throw new TexMissing(`${error.message}\nDownloading Tectonic didn't work: ${reason}`, false);
+    }
+  }
+}
+
 /** Builds the document's PDF in .latex-build/ next to it, and writes the build's report there for the view. */
 export async function compile(context: CompileContext): Promise<string> {
   const { document, documentFolder, signal } = context;
@@ -253,7 +314,8 @@ export async function compile(context: CompileContext): Promise<string> {
     await writeFile(join(documentFolder, file), serializeDocument(document));
   }
   const job = basename(file, ".tex");
-  const plan = planBuild(context.source ? parseDocument(await readFile(join(documentFolder, file), "utf8")).text : document.text, file);
+  const text = context.source ? parseDocument(await readFile(join(documentFolder, file), "utf8")).text : document.text;
+  const plan = await planWithDownload(text, file, context);
   const pdf = join(BUILD_FOLDER, `${job}.pdf`);
   const started = Date.now();
 
@@ -262,7 +324,8 @@ export async function compile(context: CompileContext): Promise<string> {
   let log = "";
   const bibliographyProblems: Problem[] = [];
   for (let runs = 1; ; runs++) {
-    context.progress(null, `Running ${plan.engine}${runs > 1 ? ` (pass ${runs})` : ""}…`);
+    const firstTectonic = plan.engine === "tectonic" && !tectonicHasPackages();
+    context.progress(null, firstTectonic ? FIRST_TECTONIC_BUILD : `Running ${plan.engine}${runs > 1 ? ` (pass ${runs})` : ""}…`);
     ({ output, code } = await run(plan.command, documentFolder, signal));
     log = await readFile(join(buildDir, `${job}.log`), "utf8").catch(() => "");
     // latexmk and Tectonic make the bibliography themselves; a plain engine needs BibTeX or Biber between its passes.

@@ -234,7 +234,12 @@ export class ChatPanel {
         break;
       }
       case "status":
-        if (event.state === "starting") this.statusLine.textContent = "Starting the agent…";
+        if (event.state === "starting") this.statusLine.textContent = event.message ?? "Starting the agent…";
+        if (event.state === "signing-in") this.statusLine.textContent = event.message ?? "Signing in…";
+        if (event.state === "signed-out") {
+          this.statusLine.textContent = "";
+          this.offerSignIn(event.message ?? "Sign in to start chatting.");
+        }
         if (event.state === "ready") this.statusLine.textContent = "";
         if (event.state === "working") this.statusLine.textContent = "Working…";
         this.setWorking(event.state === "working");
@@ -404,6 +409,24 @@ export class ChatPanel {
     this.working = working;
     this.sendButton.textContent = working ? "Stop" : "Send";
     this.sendButton.classList.toggle("stop", working);
+  }
+
+  /** A note with a Sign in button, for a host that can sign its agent in. */
+  private offerSignIn(text: string) {
+    const signIn = this.options.chat.signIn?.bind(this.options.chat);
+    if (!signIn) return this.note(text, "error");
+    this.endBlock();
+    const button = el("button", "chat-sign-in", "Sign in");
+    button.addEventListener("click", () => {
+      button.disabled = true;
+      void signIn().catch((error: Error) => {
+        button.disabled = false;
+        this.note(error.message, "error");
+      });
+    });
+    const note = el("div", "chat-note", `${text} `);
+    note.append(button);
+    this.append(note);
   }
 
   private note(text: string, kind: "info" | "error" = "info") {

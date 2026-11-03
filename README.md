@@ -10,15 +10,9 @@ It's a macOS app, and also a plugin for [Mirador](https://github.com/sodre90/mir
 
 ## Install
 
-1. Download `macos-arm64-NeoManuscript.dmg` from the [latest release](https://github.com/akanto/neo-manuscript/releases/latest)
-   (Apple silicon) and drag NeoManuscript to Applications.
-2. The app isn't signed yet, so the first time, right-click it and choose **Open**.
-3. You need TeX to build PDFs: [MacTeX](https://www.tug.org/mactex/) (`brew install --cask mactex-no-gui`) or
-   [Tectonic](https://tectonic-typesetting.github.io/).
-4. For the chat, install [Claude Code](https://claude.com/claude-code) or
-   [pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) and sign in to it once.
-
-The app updates itself: it checks for new versions on its own, and asks before restarting.
+Download `macos-arm64-NeoManuscript.dmg` from the [latest release](https://github.com/akanto/neo-manuscript/releases/latest)
+and drag NeoManuscript to Applications. The app isn't signed yet, so the first time, right-click it and choose
+**Open**. That's all: the app fetches what it needs the first time it needs it, and updates itself.
 
 ## Using it
 
@@ -26,6 +20,8 @@ The app updates itself: it checks for new versions on its own, and asks before r
   (usually `main.tex`) is the one that gets built.
 - **Source and Visual**: Source is plain LaTeX. Visual shows headings, math, lists and references as they'll look,
   and shows the markup again where your cursor is.
+- **Engine**: the menu next to **Compile**. Tectonic builds by default; choose **latexmk** to build with MacTeX
+  (see [TeX: Tectonic or MacTeX](#tex-tectonic-or-mactex)).
 - **PDF**: builds as you type, or with ⌘S. Errors link to their lines. Double-click the PDF to jump to the source.
   With ⇅ on (by default), the PDF, or a Markdown file's preview, scrolls along with the editor.
 - **Markdown**: `.md` files open too, with the same Source and Visual modes and a live preview where the PDF would be.
@@ -36,7 +32,41 @@ The app updates itself: it checks for new versions on its own, and asks before r
 
 Shortcuts: ⌘B bold, ⌘I italic, ⌘M inline math, ⇧⌘M display math, ⌥⌘P show or hide the PDF, ⌘F search.
 
-## In Mirador
+## Advanced
+
+### TeX: Tectonic or MacTeX
+
+The PDF is built with [Tectonic](https://tectonic-typesetting.github.io/) unless you choose otherwise. If it isn't
+installed, the app downloads it on the first build. That build is slow, as Tectonic also fetches the TeX packages
+the document uses; the PDF pane says so while it works. Later builds are quick and only fetch new packages.
+
+Choose **latexmk** in the engine menu to build with [MacTeX](https://www.tug.org/mactex/), the full TeX Live. It makes
+sense when a document needs:
+
+- `minted` or anything else that runs programs during the build (shell escape);
+- Biber setups Tectonic doesn't handle, or a package Tectonic's bundle doesn't have;
+- builds with no network at all;
+- the same TeX as your co-authors or a journal that uses TeX Live.
+
+latexmk runs pdfLaTeX, BibTeX or Biber, and pdfLaTeX again as many times as the references need. The choice is kept
+as a `% !TEX program = latexmk` line at the top of the main file, so it goes with the file; TeXShop and VS Code read
+it too. A line naming `xelatex` or `lualatex` builds with that engine through latexmk.
+
+To install MacTeX, run `brew install --cask mactex-no-gui` (about 6 GB), or download `MacTeX.pkg` from
+[tug.org/mactex](https://www.tug.org/mactex/). For a smaller install, use BasicTeX (`brew install --cask basictex`),
+then run `sudo tlmgr update --self && sudo tlmgr install latexmk`, and add the packages a document needs with
+`sudo tlmgr install <name>`. Restart NeoManuscript afterwards.
+
+### Chat
+
+The chat uses [Claude Code](https://claude.com/claude-code) if it's installed. Otherwise the app downloads it on the
+first chat and asks you to sign in with your Claude account. To use
+[pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) instead, install it and set up a model with `pi`.
+
+### In Mirador
+
+NeoManuscript is also a plugin for [Mirador](https://github.com/sodre90/mirador) (plugin API 6). Mirador builds it with
+its own Bun; to install it by hand, you need [Bun](https://bun.sh):
 
 ```bash
 git clone https://github.com/akanto/neo-manuscript && cd neo-manuscript
@@ -45,11 +75,11 @@ ln -s "$PWD" ~/.mirador/plugins/neo-manuscript
 ```
 
 Restart Mirador and ask its agent to open a `.tex` or `.md` file in NeoManuscript. The workspace's files are listed on
-the left; click one to edit it. It needs Mirador with plugin API 6.
+the left; click one to edit it. Builds work as in the app; the chat is Mirador's own.
 
-## Building from source
+### Building from source
 
-You need [Bun](https://bun.sh).
+You need [Bun](https://bun.sh); the end-to-end tests also need Chrome.
 
 ```bash
 bun install

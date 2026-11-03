@@ -108,6 +108,7 @@ function chatBridge(events: EventSource): ChatBridge {
     setConfig: (configId, value) => act("config", { configId, value }),
     answerPermission: (id, optionId) => void act("permission", { id, optionId }),
     openLink: (url) => void post("/open-url", { url }),
+    signIn: () => act("sign-in"),
   };
 }
 
@@ -149,6 +150,10 @@ function desktopBridge(): HostBridge<TexDocument> {
       void post("/stop", {});
     },
     storage: appStorage(),
+    async engines() {
+      const response = await fetch("/engines", { headers: { "x-token": token } });
+      return response.ok ? ((await response.json()) as string[]) : [];
+    },
     project,
     chat,
   };

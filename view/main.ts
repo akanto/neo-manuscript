@@ -1,7 +1,7 @@
 import { EditorSelection } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import type { Author, DocumentState, HostBridge, TaskState } from "../core/host-api.ts";
-import { BUILD_FOLDER, reportNamedIn, type BuildReport, type Problem } from "../core/build.ts";
+import { BUILD_FOLDER, DOWNLOADING_TECTONIC, FIRST_TECTONIC_BUILD, reportNamedIn, type BuildReport, type Problem } from "../core/build.ts";
 import type { TexDocument } from "../core/document.ts";
 import { bold, code, createEditor, flashRanges, insertList, insertMath, italic, setHeading, setProblems, type Editor, type Language, type Mode } from "./editor.ts";
 import { MarkdownPreview, mdBold, mdCode, mdHeading, mdItalic, mdList, mdMath } from "./markdown.ts";
@@ -11,7 +11,7 @@ import { drawFirstPage, PdfViewer, type PdfPoint, type PdfSelection } from "./pd
 import { lineForPdfText } from "./pdf-sync.ts";
 import css from "./styles.css" with { type: "text" };
 import { DocumentSync, fromHost } from "./sync.ts";
-import { commentStart } from "../core/latex.ts";
+import { commentStart, engineAskedFor, engineChange, type Engine } from "../core/latex.ts";
 import { fileOfTag, lineForPlace, placeForLine, readSynctex, sourceForPlace, tagOf, type PagePlace, type Synctex } from "./synctex.ts";
 import { isTextFile, kindOf, looksLikeMarkdown, type ProjectState } from "../core/project.ts";
 import { unpackThesaurus, type Thesaurus } from "./thesaurus.ts";
@@ -500,18 +500,63 @@ export function startView(host: HostBridge<TexDocument>) {
     if (auto) wantCompile();
   });
   const buildStatus = element("span", { className: "build-status" });
+
+  /**
+   * The engine the main file asks for, kept as its `% !TEX program` line, so that it goes with the file. Tectonic is
+   * the default and takes the line out; latexmk (MacTeX's) writes it. Another engine a file names shows while it does.
+   */
+  const ENGINE_NAMES: Record<Engine, string> = { latexmk: "latexmk (MacTeX)", pdflatex: "pdfLaTeX", xelatex: "XeLaTeX", lualatex: "LuaLaTeX", tectonic: "Tectonic" };
+  const engineMenu = element("select", { className: "engine-menu" });
+  const engineOption = (value: string, label: string, title = "") => element("option", { value, title }, label);
+  const latexmkOption = engineOption("latexmk", ENGINE_NAMES.latexmk, "MacTeX's full TeX Live: every package, shell escape (minted), Biber, no network");
+  /** The option for an engine the file names that the menu doesn't offer, while it names it. */
+  const otherOption = engineOption("other", "");
+  engineMenu.append(engineOption("", ENGINE_NAMES.tectonic, "Fetches the packages a document needs; downloaded on the first build when it isn't installed"), latexmkOption);
+  void host.engines?.().then((installed) => {
+    if (installed.includes("latexmk")) return;
+    latexmkOption.disabled = true;
+    latexmkOption.textContent = `${ENGINE_NAMES.latexmk}: not installed`;
+  });
+  /** The menu applies to the main file: in a chapter, it shows nothing to choose. */
+  const editingMain = () => !project?.main || editingFile() === project.main;
+  function showEngine() {
+    const asked = engineAskedFor(editor?.view.state.doc.toString() ?? "");
+    if (asked && asked !== "tectonic" && asked !== "latexmk") {
+      otherOption.textContent = `${ENGINE_NAMES[asked]} (named in the file)`;
+      otherOption.dataset.engine = asked;
+      engineMenu.append(otherOption);
+      engineMenu.value = "other";
+    } else {
+      otherOption.remove();
+      engineMenu.value = asked === "latexmk" ? "latexmk" : "";
+    }
+    const main = editingMain();
+    engineMenu.disabled = !main || !builds();
+    engineMenu.title = main ? "What builds the PDF, kept as a % !TEX program line at the top of the file" : `The engine is chosen in the main file, ${project?.main}`;
+  }
+  engineMenu.addEventListener("change", () => {
+    if (!editor || !editingMain()) return;
+    if (engineMenu.value === "other") return;
+    const engine = engineMenu.value === "latexmk" ? "latexmk" : null;
+    const change = engineChange(editor.view.state.doc.toString(), engine);
+    if (change) editor.view.dispatch({ changes: change, userEvent: "input" });
+    compileNow();
+  });
   const zoomLabel = element("span", { className: "zoom-label" });
   viewer.onZoom = (label) => (zoomLabel.textContent = label);
   const problemsToggle = element("button", { type: "button", className: "problems-toggle", hidden: true });
   const problemsList = element("ul", { className: "problems", hidden: true });
   problemsToggle.addEventListener("click", () => (problemsList.hidden = !problemsList.hidden));
   const placeholder = element("div", { className: "pdf-empty" }, "The PDF shows here once the document compiles.");
+  /** Over the PDF while Tectonic downloads, or fetches packages for its first build: why the PDF takes a while. */
+  const setupNotice = element("div", { className: "pdf-notice", hidden: true });
 
   previewPane.append(
     element(
       "div",
       { className: "preview-bar" },
       compileButton,
+      engineMenu,
       element("label", { className: "auto", title: "Compile when the text stops changing" }, autoBox, " Auto"),
       buildStatus,
       problemsToggle,
@@ -523,6 +568,7 @@ export function startView(host: HostBridge<TexDocument>) {
       button("▭", "Fit page", () => viewer.setZoom({ fit: "page" })),
     ),
     problemsList,
+    setupNotice,
     placeholder,
     viewer.element,
     markdownPreview.element,
@@ -753,6 +799,9 @@ export function startView(host: HostBridge<TexDocument>) {
     lastTask = { runId: task.runId, state: task.state };
     taskRunning = task.state === "running";
     compileButton.disabled = taskRunning;
+    const settingUp = taskRunning && task.text !== null && (task.text.startsWith(DOWNLOADING_TECTONIC) || task.text === FIRST_TECTONIC_BUILD);
+    setupNotice.hidden = !settingUp;
+    if (settingUp) setupNotice.textContent = `${task.text} The PDF shows here once it's built; later builds are quick.`;
     if (taskRunning) {
       buildStatus.textContent = task.text ?? "Compiling…";
       return;
@@ -844,6 +893,7 @@ export function startView(host: HostBridge<TexDocument>) {
       // For a host that names the file in the editor only here, problems and SyncTeX follow it.
       retag();
       editor?.view.dispatch({ effects: setProblems.of(problemsOfShownFile()) });
+      showEngine();
       // No file open: the open one went, and the project has no main file to fall back to.
       if (state.open === null && editor) {
         editor.view.destroy();
@@ -882,6 +932,7 @@ export function startView(host: HostBridge<TexDocument>) {
       drawPdf: drawFirstPage,
       onChange: (fromUser) => {
         if (fromUser) sync?.typed();
+        showEngine();
         wantCompile();
         wantMarkdown();
       },
@@ -918,6 +969,7 @@ export function startView(host: HostBridge<TexDocument>) {
       if (body) editor.view.dispatch({ selection: { anchor: body.index + body[0].length } });
     }
     drawMarkdown();
+    showEngine();
     if (!first) return;
 
     // The last build's PDF shows at once (taskChanged reads it when the host still has its task), and a new build follows.

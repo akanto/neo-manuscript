@@ -42,17 +42,27 @@ bun hosts/desktop/serve.ts <folder>   # the desktop app's server alone, to use t
 
 ## How things work
 
-- **Build engine**, in order: a `% !TEX program = …` line; `latexmk` if installed; the plain engine with BibTeX or
-  Biber between passes; Tectonic. Output goes to `.latex-build/`, with a `<job>.report.json` the view reads. TeX is
-  also looked for in `/Library/TeX/texbin`, `/opt/homebrew/bin` and `/usr/local/bin`, as apps started from the Dock
-  don't get the shell's PATH.
+- **Build engine**: Tectonic, unless a `% !TEX program = …` line names another: `latexmk` runs latexmk with pdflatex,
+  and `pdflatex`/`xelatex`/`lualatex` run through latexmk, else the plain engine with BibTeX or Biber between passes.
+  Tectonic runs with `--keep-intermediates`, as the view reads citations from the `.aux`. Output goes to
+  `.latex-build/`, with a `<job>.report.json` the view reads. TeX is also looked for in `/Library/TeX/texbin`,
+  `/opt/homebrew/bin` and `/usr/local/bin`, as apps started from the Dock don't get the shell's PATH. With no Tectonic
+  installed, `compile()` downloads the pinned one (`core/tectonic.ts`, sha256-checked by `core/downloads.ts`) on the
+  first build and keeps it in the tools folder (`~/Library/Application Support/NeoManuscript/tools` on macOS,
+  `NEO_TOOLS_DIR` overrides it). While it downloads, and while Tectonic fetches packages for its first build, the build's
+  progress text is one of `core/build.ts`'s, and the view shows it over the PDF. The view's engine menu (Tectonic, or
+  latexmk) writes or takes out the `% !TEX program` line (`engineChange` in `core/latex.ts`) in the main file, and greys
+  out latexmk when the host's `engines()` doesn't list it (the desktop app's `/engines`; Mirador's view can't tell).
 - **Markdown**: `.md` and `.markdown` files are edited as Markdown and don't build; the preview pane renders them.
   A folder with no main file opens its README.md, else index.md, else its first Markdown file. A project with no
   `.tex` file at all doesn't build, and the agent is told it is Markdown.
 - **Main file**: `main.tex`, else the only top-level `.tex` with `\documentclass`, else the one named like the
   folder, else the first by name; the user can choose another in the desktop app.
 - **Agents (desktop)**: Claude Code via `claude-agent-acp` and pi via `pi-acp`, bundled into `dist/desktop/agents` and
-  run with the app's Bun. `pi-acp` doesn't pass MCP servers to pi, so agents edit files with their own tools in the
+  run with the app's Bun. With no `claude` installed, the app fetches the SDK's own Claude Code from npm on the first
+  chat (`claude-code.ts`; version and sha512 from bun.lock, written to `claude-code.json` at build time) into the
+  tools folder of `core/downloads.ts`. A signed-out Claude Code gets a "signed-out" status, and the chat's Sign in
+  button runs `claude auth login`. `pi-acp` doesn't pass MCP servers to pi, so agents edit files with their own tools in the
   project folder; the app sees the changes and credits the agent while its turn runs. Claude's ACP file reads and
   writes go through the open documents. Agents build through `POST /agent/compile` (a `curl` line in the context
   added after the user's first message). Conversations resume with ACP `session/load`; projects open by real path
@@ -80,7 +90,7 @@ an update locally, build two versions with `NEO_RELEASE_BASE_URL=http://127.0.0.
 - Comments and messages in plain, short sentences that say what a thing is or does.
 - Run the typecheck and unit tests before committing; run `bun run e2e` when the view changes.
 
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:1105d646 -->
+<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:46cd31e7 -->
 ## Beads Issue Tracker
 
 This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
@@ -124,6 +134,7 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 
    # Team-maintainer opt-in only, unless current instructions forbid it:
    git pull --rebase
+   bd dolt push
    git push
    git status
    ```

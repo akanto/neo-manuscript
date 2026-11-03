@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bibliographyProblemsIn, bibliographyTool, citationsIn, compile, isUpToDate, planBuild, problemsIn, searchPath, type CompileContext } from "../core/compile.ts";
+import { bibliographyProblemsIn, bibliographyTool, citationsIn, compile, isUpToDate, planBuild, problemsIn, searchPath, TexMissing, type CompileContext } from "../core/compile.ts";
 import { reportNamedIn, type BuildReport } from "../core/build.ts";
 import { parseDocument } from "../core/document.ts";
 
@@ -11,19 +11,38 @@ describe("planBuild", () => {
   const all = (command: string) => `/bin/${command}`;
   const only = (...names: string[]) => (command: string) => (names.includes(command) ? `/bin/${command}` : null);
 
-  test("uses latexmk when there is one, with the engine the file asks for", () => {
-    expect(planBuild("x", "a.tex", all).command.slice(0, 2)).toEqual(["/bin/latexmk", "-pdf"]);
-    expect(planBuild("% !TEX program = xelatex\nx", "a.tex", all).command.slice(0, 2)).toEqual(["/bin/latexmk", "-pdfxe"]);
-  });
-
-  test("runs the engine itself without latexmk, and tectonic without TeX", () => {
-    expect(planBuild("x", "a.tex", only("pdflatex", "tectonic")).engine).toBe("pdflatex");
-    expect(planBuild("x", "a.tex", only("tectonic")).engine).toBe("tectonic");
+  test("builds with Tectonic unless the file asks for another engine", () => {
+    expect(planBuild("x", "a.tex", all).engine).toBe("tectonic");
     expect(planBuild("% !TeX TS-program = tectonic\n", "a.tex", all).engine).toBe("tectonic");
   });
 
-  test("says how to install TeX when there is none", () => {
-    expect(() => planBuild("x", "a.tex", only())).toThrow(/Install MacTeX or TeX Live/);
+  test("uses latexmk when the file asks for it or for another engine, with that engine", () => {
+    expect(planBuild("% !TEX program = latexmk\nx", "a.tex", all).command.slice(0, 2)).toEqual(["/bin/latexmk", "-pdf"]);
+    expect(planBuild("% !TEX program = xelatex\nx", "a.tex", all).command.slice(0, 2)).toEqual(["/bin/latexmk", "-pdfxe"]);
+  });
+
+  test("runs the engine itself without latexmk", () => {
+    expect(planBuild("% !TEX program = pdflatex\nx", "a.tex", only("pdflatex")).engine).toBe("pdflatex");
+  });
+
+  test("says how to install what is missing", () => {
+    expect(() => planBuild("x", "a.tex", only())).toThrow(/Install Tectonic/);
+    expect(() => planBuild("% !TEX program = latexmk\nx", "a.tex", only("tectonic"))).toThrow(/Install MacTeX or TeX Live/);
+  });
+
+  test("says when a downloaded Tectonic would do instead", () => {
+    const missing = (text: string) => {
+      try {
+        planBuild(text, "a.tex", only());
+      } catch (error) {
+        return error;
+      }
+    };
+    expect(missing("x")).toBeInstanceOf(TexMissing);
+    expect((missing("x") as TexMissing).tectonicWouldDo).toBe(true);
+    expect((missing("% !TEX program = tectonic\nx") as TexMissing).tectonicWouldDo).toBe(true);
+    expect((missing("% !TEX program = xelatex\nx") as TexMissing).tectonicWouldDo).toBe(false);
+    expect((missing("% !TEX program = latexmk\nx") as TexMissing).tectonicWouldDo).toBe(false);
   });
 });
 

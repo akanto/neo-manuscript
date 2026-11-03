@@ -63,14 +63,35 @@ export type Engine = (typeof ENGINES)[number];
  * TeXShop, TeXstudio and VS Code's LaTeX Workshop read it; null when there is none.
  */
 export function engineAskedFor(text: string): Engine | null {
+  return engineLine(text)?.engine ?? null;
+}
+
+const ENGINE_LINE = /^\s*%\s*!\s*TEX\s+(?:TS-)?program\s*=\s*([A-Za-z]+)/i;
+
+/** The `% !TEX program` line among the first 30, with its place in the text (the line break left out). */
+function engineLine(text: string): { from: number; to: number; engine: Engine | null } | null {
+  let from = 0;
   for (const line of text.split("\n", 30)) {
-    const match = /^\s*%\s*!\s*TEX\s+(?:TS-)?program\s*=\s*([A-Za-z]+)/i.exec(line);
+    const match = ENGINE_LINE.exec(line);
     if (match) {
       const name = match[1]!.toLowerCase();
-      return (ENGINES as readonly string[]).includes(name) ? (name as Engine) : null;
+      return { from, to: from + line.length, engine: (ENGINES as readonly string[]).includes(name) ? (name as Engine) : null };
     }
+    from += line.length + 1;
   }
   return null;
+}
+
+/**
+ * The edit that makes the file ask for `engine`, or for none (null): the `% !TEX program` line changed, added at the
+ * top, or taken out with its line break. Null when the file asks for it already.
+ */
+export function engineChange(text: string, engine: Engine | null): { from: number; to: number; insert: string } | null {
+  const line = engineLine(text);
+  if (!line) return engine ? { from: 0, to: 0, insert: `% !TEX program = ${engine}\n` } : null;
+  if (line.engine === engine) return null;
+  if (!engine) return { from: line.from, to: Math.min(text.length, line.to + 1), insert: "" };
+  return { from: line.from, to: line.to, insert: `% !TEX program = ${engine}` };
 }
 
 /** The document class, as `\documentclass[...]{article}` names it. */

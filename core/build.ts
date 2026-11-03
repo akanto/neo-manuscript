@@ -31,3 +31,8 @@ export const reportPath = (job: string) => `${BUILD_FOLDER}/${job}.report.json`;
 export function reportNamedIn(text: string | null | undefined): string | null {
   return text ? (/Report: (\S+\.report\.json)/.exec(text)?.[1] ?? null) : null;
 }
+
+/** What a build says while it downloads Tectonic, before its percentage; the view shows it over the PDF. */
+export const DOWNLOADING_TECTONIC = "Downloading Tectonic for the first build";
+/** What a build says while Tectonic fetches the TeX packages for its first build; the view shows it over the PDF. */
+export const FIRST_TECTONIC_BUILD = "Tectonic is fetching TeX packages for its first build; this takes a minute or two…";

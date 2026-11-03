@@ -5,7 +5,8 @@ import { isAbsolute, relative, sep } from "node:path";
 import type { ChatEvent, ChatImage, PastChat } from "../../core/chat.ts";
 import type { Author } from "../../core/host-api.ts";
 import { isTextFile, kindOf } from "../../core/project.ts";
-import { agentCommand, agents, type AgentId } from "./agents.ts";
+import { agentCommand, agentEnvironment, agents, claudeProgram, type AgentId } from "./agents.ts";
+import { isSignedIn, signIn } from "./claude-code.ts";
 import type { ProjectHost } from "./project-host.ts";
 
 export interface ChatOptions {
@@ -26,6 +27,12 @@ export interface ChatOptions {
  * shows again. It goes after them because agents name a conversation by the start of its first message.
  */
 const CONTEXT = /\s*<context>[\s\S]*?(<\/context>\s*$|$)/;
+
+/** ACP's error for an agent that wants its user to sign in first. */
+const AUTH_REQUIRED = -32000;
+
+/** The agent can't start until the user signs in; the view offers to (see signIn()). */
+class SignedOut extends Error {}
 
 /**
  * A conversation with an agent about the project: the agent's process, its ACP session in the project's folder, and
@@ -55,7 +62,7 @@ export class ChatSession {
 
   constructor(readonly agent: AgentId, private options: ChatOptions) {
     this.skipStartupNotes = agent === "pi";
-    void agents().then((list) => this.emit({ type: "agents", agents: list, current: agent }));
+    void agents(options.agentsFolder).then((list) => this.emit({ type: "agents", agents: list, current: agent }));
   }
 
   all(): readonly ChatEvent[] {
@@ -80,7 +87,9 @@ export class ChatSession {
   private start(): Promise<void> {
     this.starting ??= this.connect().catch((error: Error) => {
       this.starting = null;
-      this.emit({ type: "status", state: "failed", message: error.message });
+      const signedOut = error instanceof SignedOut || (error as { code?: unknown }).code === AUTH_REQUIRED;
+      if (signedOut) this.emit({ type: "status", state: "signed-out", message: "Sign in to Claude to start chatting." });
+      else this.emit({ type: "status", state: "failed", message: error.message });
       this.close();
       throw error;
     });
@@ -90,7 +99,15 @@ export class ChatSession {
   private async connect() {
     this.emit({ type: "status", state: "starting" });
     const { project, agentsFolder, appUrl, token } = this.options;
-    const { command, env } = await agentCommand(this.agent, agentsFolder, { NEO_MANUSCRIPT_URL: appUrl, NEO_MANUSCRIPT_TOKEN: token });
+    let shown = -1;
+    const downloading = (share: number | null) => {
+      const percent = share === null ? null : Math.floor(share * 20) * 5;
+      if (percent !== null && percent === shown) return;
+      shown = percent ?? -1;
+      this.emit({ type: "status", state: "starting", message: `Downloading Claude Code for the first chat${percent === null ? "" : ` (${percent}%)`}…` });
+    };
+    const { command, env, program } = await agentCommand(this.agent, agentsFolder, { NEO_MANUSCRIPT_URL: appUrl, NEO_MANUSCRIPT_TOKEN: token }, downloading);
+    if (this.agent === "claude" && (await isSignedIn(program, env)) === false) throw new SignedOut();
     const child = Bun.spawn(command, { cwd: project.folder, env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
     this.process = child;
     let stderr = "";
@@ -257,6 +274,21 @@ export class ChatSession {
     const params: SetSessionConfigOptionRequest = typeof value === "boolean" ? { sessionId: this.sessionId, configId, type: "boolean", value } : { sessionId: this.sessionId, configId, value };
     const response = await this.connection.agent.request(methods.agent.session.setConfigOption, params);
     this.emit({ type: "config", options: response.configOptions });
+  }
+
+  /** Signs in to Claude Code in the browser, then starts the agent again. */
+  async signIn() {
+    if (this.agent !== "claude") throw new Error("Only Claude signs in from the app; set pi up with `pi` in a terminal.");
+    const program = await claudeProgram(this.options.agentsFolder);
+    if (!program) throw new Error("Claude Code isn't here yet; start the chat first.");
+    this.emit({ type: "status", state: "signing-in", message: "Finish signing in in your browser…" });
+    try {
+      await signIn(program, await agentEnvironment());
+    } catch (error) {
+      this.emit({ type: "status", state: "signed-out", message: (error as Error).message });
+      return;
+    }
+    this.warmUp();
   }
 
   /** Starts the agent before the first message, so the user can choose its model meanwhile. */

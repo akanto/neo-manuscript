@@ -1,6 +1,7 @@
 import type { AgentId } from "./agents.ts";
 import type { ChatImage } from "../../core/chat.ts";
 import { ChatSession } from "./chat.ts";
+import { installedEngines } from "../../core/compile.ts";
 import { pageFor, startPage } from "./pages.ts";
 import type { ProjectHost } from "./project-host.ts";
 
@@ -131,6 +132,7 @@ export function startServer({ port = 0, viewCode, storage, chooseProject, agents
         if (/^https?:\/\//.test(link)) openExternal?.(link);
         return new Response("ok");
       }
+      if (url.pathname === "/engines") return Response.json(installedEngines());
       if (url.pathname === "/storage" && post) {
         const { key, value } = (await request.json()) as { key: string; value: string | null };
         storage.set(key, value);
@@ -190,6 +192,7 @@ export function startServer({ port = 0, viewCode, storage, chooseProject, agents
           return new Response("ok");
         }
         if (action === "warm-up") current.warmUp();
+        if (action === "sign-in") return attempt(() => current.signIn());
         if (action === "cancel") current.cancel();
         if (action === "permission" && typeof body.id === "number") current.answer(body.id, body.optionId ?? null);
         if (action === "config" && body.configId && body.value !== undefined) return attempt(() => current.setConfig(body.configId!, body.value!));

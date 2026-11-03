@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
+import { canDownloadClaudeCode, downloadClaudeCode, downloadedClaudeCode } from "./claude-code.ts";
 
 export type AgentId = "claude" | "pi";
 
@@ -52,19 +53,43 @@ const PROGRAMS: Record<AgentId, { label: string; program: string; install: strin
   pi: { label: "pi", program: "pi", install: "pi isn't installed: `npm install -g @earendil-works/pi-coding-agent`, then set up a model with `pi`." },
 };
 
-export async function agents(): Promise<AgentInfo[]> {
-  return Promise.all((Object.keys(PROGRAMS) as AgentId[]).map(async (id) => ({ id, label: PROGRAMS[id].label, missing: (await find(PROGRAMS[id].program)) ? null : PROGRAMS[id].install })));
+/** Claude Code as installed, else as fetched before (see claude-code.ts); null when it has to be fetched first. */
+export async function claudeProgram(agentsFolder: string): Promise<string | null> {
+  return (await find("claude")) ?? downloadedClaudeCode(agentsFolder);
 }
 
-/** The command and environment that start an agent's ACP side. */
-export async function agentCommand(id: AgentId, agentsFolder: string, extraEnvironment: Record<string, string>): Promise<{ command: string[]; env: Record<string, string> }> {
-  const program = await find(PROGRAMS[id].program);
-  if (!program) throw new Error(PROGRAMS[id].install);
+/** Claude needs nothing installed when the app can fetch Claude Code for this machine; pi needs pi. */
+export async function agents(agentsFolder: string): Promise<AgentInfo[]> {
+  const available = async (id: AgentId) => (await find(PROGRAMS[id].program)) !== null || (id === "claude" && canDownloadClaudeCode(agentsFolder));
+  return Promise.all((Object.keys(PROGRAMS) as AgentId[]).map(async (id) => ({ id, label: PROGRAMS[id].label, missing: (await available(id)) ? null : PROGRAMS[id].install })));
+}
+
+/** The environment an agent's programs run with: the user's login shell's PATH. */
+export async function agentEnvironment(extraEnvironment: Record<string, string> = {}): Promise<Record<string, string>> {
+  return { ...(process.env as Record<string, string>), PATH: await agentPath(), ...extraEnvironment };
+}
+
+/**
+ * The command and environment that start an agent's ACP side, and the program it drives. Claude Code is fetched
+ * first when the user has none, with `downloading` told how far it got (0 to 1, or null when the size isn't known).
+ */
+export async function agentCommand(
+  id: AgentId,
+  agentsFolder: string,
+  extraEnvironment: Record<string, string>,
+  downloading?: (share: number | null) => void,
+): Promise<{ command: string[]; env: Record<string, string>; program: string }> {
   const script = join(agentsFolder, id === "claude" ? "claude-agent-acp.js" : "pi-acp.js");
   if (!existsSync(script)) throw new Error(`The app is missing ${script}; build it with \`bun scripts/build-desktop.ts\``);
-  const env: Record<string, string> = { ...(process.env as Record<string, string>), PATH: await agentPath(), ...extraEnvironment };
-  // claude-agent-acp runs the Claude Code installed, as the user signed in to it; pi-acp the pi installed.
+  let program = id === "claude" ? await claudeProgram(agentsFolder) : await find(PROGRAMS[id].program);
+  if (!program && id === "claude" && canDownloadClaudeCode(agentsFolder)) {
+    downloading?.(null);
+    program = await downloadClaudeCode(agentsFolder, { progress: downloading });
+  }
+  if (!program) throw new Error(PROGRAMS[id].install);
+  const env = await agentEnvironment(extraEnvironment);
+  // claude-agent-acp runs this Claude Code, as the user signed in to it; pi-acp the pi installed.
   if (id === "claude") env.CLAUDE_CODE_EXECUTABLE = program;
   else env.PI_ACP_PI_COMMAND = program;
-  return { command: [process.execPath, script], env };
+  return { command: [process.execPath, script], env, program };
 }

@@ -61,6 +61,8 @@ export interface HostBridge<Document = unknown> {
   run?(task: string): void;
   stopTask?(): void;
   storage?: Storage;
+  /** The TeX engines this machine can build with (see core/latex.ts); without it the view offers them all. */
+  engines?(): Promise<string[]>;
   /** A host with a project of several files: the view then shows its files, and opens one in place of another. */
   project?: ProjectBridge;
   /** A host with a chat of its own with an agent: the view then shows it, and its Ask goes there. */
@@ -87,6 +89,8 @@ export interface ChatBridge {
   answerPermission(id: number, optionId: string | null): void;
   /** Opens a link of the agent's answer outside the app. */
   openLink(url: string): void;
+  /** Signs the agent in, for a host that can (after a "signed-out" status); the agent then starts again. */
+  signIn?(): Promise<void>;
 }
 
 /**
