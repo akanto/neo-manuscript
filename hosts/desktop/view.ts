@@ -109,6 +109,11 @@ function chatBridge(events: EventSource): ChatBridge {
     answerPermission: (id, optionId) => void act("permission", { id, optionId }),
     openLink: (url) => void post("/open-url", { url }),
     signIn: () => act("sign-in"),
+    async rewrite(request, signal) {
+      const answer = await fetch("/chat/rewrite", { method: "POST", headers: { "x-token": token, "content-type": "application/json" }, body: JSON.stringify(request), signal });
+      if (!answer.ok) throw new Error((await answer.text()) || `The app answered ${answer.status}`);
+      return answer.text();
+    },
   };
 }
 

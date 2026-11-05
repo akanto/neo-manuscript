@@ -1,4 +1,5 @@
 import type { AgentId } from "./agents.ts";
+import type { RewriteRequest } from "../../core/assist.ts";
 import type { ChatImage } from "../../core/chat.ts";
 import { ChatSession } from "./chat.ts";
 import { installedEngines } from "../../core/compile.ts";
@@ -170,6 +171,11 @@ export function startServer({ port = 0, viewCode, storage, chooseProject, agents
         } catch (error) {
           return new Response(`${(error as Error).message}\n`);
         }
+      }
+      if (url.pathname === "/chat/rewrite" && post) {
+        // The writing assistant's answer; a page that goes away, or asks again, stops it.
+        const rewrite = (await request.json()) as RewriteRequest;
+        return attempt(() => (chat ?? startChat(open)).rewrite(rewrite, request.signal));
       }
       if (post && url.pathname.startsWith("/chat/")) {
         const body = (await request.json()) as { text?: string; images?: ChatImage[]; id?: number; optionId?: string | null; configId?: string; value?: string | boolean; agent?: AgentId; sessionId?: string };

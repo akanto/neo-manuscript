@@ -4,6 +4,7 @@
  * Mirador's `window.mirador` is a HostBridge as it is.
  */
 
+import type { RewriteRequest } from "./assist.ts";
 import type { ChatEvent, ChatImage, PastChat } from "./chat.ts";
 import type { ProjectState } from "./project.ts";
 
@@ -91,6 +92,11 @@ export interface ChatBridge {
   openLink(url: string): void;
   /** Signs the agent in, for a host that can (after a "signed-out" status); the agent then starts again. */
   signIn?(): Promise<void>;
+  /**
+   * Has the agent rewrite a passage on the side, out of the conversation, and answers with what it said (see
+   * core/assist.ts). A new rewrite stops the one before it.
+   */
+  rewrite?(request: RewriteRequest, signal?: AbortSignal): Promise<string>;
 }
 
 /**

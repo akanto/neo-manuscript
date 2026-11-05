@@ -231,6 +231,28 @@ for (const setup of setups) describe.skipIf(!setup.run)(`the view ${setup.name}`
     expect(prompts.at(-1)).toContain("be a smooth function.");
   });
 
+  test("selecting a passage offers writing actions, which go to the agent with the passage and its lines", async () => {
+    expect(await selectWord("Its gradient")).toBe(true);
+    expect(await root.locator(".assist-panel").count()).toBe(0);
+    const frame = setup.mirador ? page.frames().find((candidate) => candidate !== page.mainFrame())! : page.mainFrame();
+    // A whole line: more than the synonyms take.
+    await frame.evaluate(() => {
+      const line = [...document.querySelectorAll(".cm-line")].find((node) => node.textContent!.startsWith("Let "))!;
+      const range = document.createRange();
+      range.selectNodeContents(line);
+      getSelection()!.removeAllRanges();
+      getSelection()!.addRange(range);
+    });
+    await root.locator(".assist-panel .assist-action[data-action=grammar]").waitFor({ timeout: 10_000 });
+    expect(await root.locator(".syn-panel").count()).toBe(0);
+    await root.locator(".assist-action[data-action=grammar]").click();
+    let prompts: string[] = [];
+    for (let tries = 0; tries < 20 && !prompts.at(-1)?.startsWith("Rewrite"); tries++, await Bun.sleep(100)) prompts = await page.evaluate(() => (window as unknown as { __prompts: string[] }).__prompts);
+    expect(prompts.at(-1)).toStartWith("Rewrite this passage of the document (line 24 of the open file). Correct only errors of grammar");
+    expect(prompts.at(-1)).toContain("```latex\nLet $f\\colon \\R^n \\to \\R$ be a smooth function.");
+    await page.keyboard.press("Escape");
+  });
+
   test("text selected in the PDF can be copied, and Ask asks about it with its source lines", async () => {
     const span = root.locator(".textLayer span", { hasText: "Euler" }).first();
     await span.waitFor({ timeout: 10_000 });

@@ -389,3 +389,19 @@ span.cm-md-rule { display: inline-block; width: 100%; margin: 0; }
 .md-preview .md-image-missing { color: var(--muted); font-size: 12px; }
 .md-preview input[type="checkbox"] { margin: 0 0.4em 0 -1.4em; }
 .md-preview .md-math-display { text-align: center; overflow-x: auto; margin: 0.6em 0; }
+
+/* Writing actions on a selected passage */
+.cm-editor .cm-tooltip.assist-panel { max-width: 420px; min-width: 260px; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px light-dark(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.5)); font: 12px system-ui, -apple-system, sans-serif; overflow: hidden; padding: 6px 8px; }
+.assist-actions, .assist-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.assist-action, .assist-accept, .assist-retry, .assist-discard, .assist-cancel, .assist-back { padding: 2px 9px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--fg); font: inherit; cursor: pointer; }
+.assist-action:hover, .assist-retry:hover, .assist-discard:hover, .assist-cancel:hover, .assist-back:hover { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+.assist-accept { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+.assist-accept:hover { opacity: 0.88; }
+.assist-instruction { box-sizing: border-box; width: 100%; margin-top: 6px; padding: 3px 7px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; }
+.assist-instruction:focus { outline: none; border-color: var(--accent); }
+.assist-note { color: var(--muted); padding: 2px 0 6px; }
+.assist-buttons .assist-cancel:first-child, .assist-note + .assist-buttons { margin-top: 0; }
+.assist-diff { width: 408px; max-width: 100%; max-height: 240px; overflow-y: auto; box-sizing: border-box; padding: 6px 8px; margin-bottom: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; font-size: 12.5px; }
+.assist-removed { color: light-dark(#b42318, #ff9b92); background: light-dark(rgba(217, 45, 32, 0.1), rgba(255, 110, 100, 0.15)); text-decoration: line-through; }
+.assist-added { color: light-dark(#05603a, #7ee2a8); background: light-dark(rgba(18, 183, 106, 0.16), rgba(60, 200, 130, 0.18)); }
+.assist-removed + .assist-added { margin-left: 2px; }

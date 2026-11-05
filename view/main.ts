@@ -944,6 +944,7 @@ export function startView(host: HostBridge<TexDocument>) {
       onCompile: compileNow,
       onTogglePreview: togglePreview,
       synonyms: { thesaurus: loadThesaurus, ask: prompt, report: showBanner },
+      assist: { rewrite: host.chat?.rewrite ? (request, signal) => host.chat!.rewrite!(request, signal) : null, ask: prompt, report: showBanner },
       isRemote: (transaction) => transaction.annotation(fromHost) === true,
     });
     const file = shownFile;

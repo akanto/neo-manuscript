@@ -1,7 +1,9 @@
 import { client, methods, ndJsonStream, type ClientConnection } from "@agentclientprotocol/sdk";
 import type { ContentBlock, RequestPermissionRequest, SessionUpdate, SetSessionConfigOptionRequest } from "@agentclientprotocol/sdk";
-import { readFile, writeFile } from "node:fs/promises";
-import { isAbsolute, relative, sep } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { isAbsolute, join, relative, sep } from "node:path";
+import { ASSIST_SYSTEM_PROMPT, rewritePrompt, type RewriteRequest } from "../../core/assist.ts";
 import type { ChatEvent, ChatImage, PastChat } from "../../core/chat.ts";
 import type { Author } from "../../core/host-api.ts";
 import { isTextFile, kindOf } from "../../core/project.ts";
@@ -34,6 +36,18 @@ const AUTH_REQUIRED = -32000;
 /** The agent can't start until the user signs in; the view offers to (see signIn()). */
 class SignedOut extends Error {}
 
+/** A side conversation of the writing assistant takes this many rewrites before a fresh one starts. */
+const REWRITES_PER_SESSION = 12;
+
+/**
+ * The writing assistant's side conversation (see rewrite()): Claude Code with a system prompt of its own, no tools, and
+ * nothing kept on disk; pi as it is, told what it is in each message.
+ */
+function assistantMeta(agent: AgentId) {
+  if (agent !== "claude") return undefined;
+  return { systemPrompt: ASSIST_SYSTEM_PROMPT, claudeCode: { options: { tools: [], persistSession: false, settingSources: [] } } };
+}
+
 /**
  * A conversation with an agent about the project: the agent's process, its ACP session in the project's folder, and
  * what it said. The agent changes files with its own tools; the app sees them as changes made outside it, and while
@@ -59,6 +73,11 @@ export class ChatSession {
   private userPieces: { text: string; images: ChatImage[] } | null = null;
   /** pi-acp sends its startup notes (pi's version, extensions) as the first part of its first answer. */
   private skipStartupNotes: boolean;
+  /** The writing assistant's side conversation on the same agent, and how many rewrites it has had. */
+  private assistant: { sessionId: string; uses: number } | null = null;
+  /** The rewrite under way: what the agent has said so far, and how to stop it. */
+  private rewriting: { sessionId: string; text: string; stop: () => void } | null = null;
+  private rewrites: Promise<unknown> = Promise.resolve();
 
   constructor(readonly agent: AgentId, private options: ChatOptions) {
     this.skipStartupNotes = agent === "pi";
@@ -119,6 +138,7 @@ export class ChatSession {
       this.process = null;
       this.connection = null;
       this.sessionId = null;
+      this.assistant = null;
       this.starting = null;
       this.working = false;
       const said = stderr.trim().split("\n").slice(-4).join("\n");
@@ -133,11 +153,16 @@ export class ChatSession {
     });
     const app = client({ name: "neo-manuscript" })
       .onNotification(methods.client.session.update, ({ params }) => {
-        if (params.sessionId === this.sessionId || this.loading) this.updated(params.update);
+        if (params.sessionId === this.assistant?.sessionId) this.rewritten(params.update);
+        else if (params.sessionId === this.sessionId || this.loading) this.updated(params.update);
       })
-      .onRequest(methods.client.session.requestPermission, ({ params }) => this.askPermission(params))
+      // The writing assistant asks nothing of the user and changes no file.
+      .onRequest(methods.client.session.requestPermission, ({ params }) =>
+        params.sessionId === this.assistant?.sessionId ? { outcome: { outcome: "cancelled" as const } } : this.askPermission(params),
+      )
       .onRequest(methods.client.fs.readTextFile, ({ params }) => this.readTextFile(params.path, params.line ?? null, params.limit ?? null))
       .onRequest(methods.client.fs.writeTextFile, async ({ params }) => {
+        if (params.sessionId === this.assistant?.sessionId) throw new Error("The writing assistant doesn't change files");
         await this.writeTextFile(params.path, params.content);
         return {};
       });
@@ -234,6 +259,89 @@ export class ChatSession {
       this.working = false;
       if (this.connection) this.emit({ type: "status", state: "ready" });
     }
+  }
+
+  /**
+   * Has the agent rewrite a passage (see core/assist.ts) in a side conversation of its own, which the chat doesn't
+   * show, and answers with what the agent said. One runs at a time: a new one stops the one before it.
+   */
+  rewrite(request: RewriteRequest, signal?: AbortSignal): Promise<string> {
+    this.rewriting?.stop();
+    const run = this.rewrites.then(() => this.rewriteNow(request, signal));
+    this.rewrites = run.catch(() => {});
+    return run;
+  }
+
+  private async rewriteNow(request: RewriteRequest, signal?: AbortSignal): Promise<string> {
+    const stopped = () => new Error("The rewrite was stopped");
+    if (signal?.aborted) throw stopped();
+    try {
+      await this.start();
+    } catch (error) {
+      throw error instanceof SignedOut ? new Error("Sign in to Claude in the chat first.") : error;
+    }
+    const connection = this.connection;
+    if (!connection) throw new Error("The agent isn't running");
+    const sessionId = await this.assistantSession(connection);
+    const text = this.agent === "claude" ? rewritePrompt(request) : `${ASSIST_SYSTEM_PROMPT}\n\n${rewritePrompt(request)}`;
+    let cancelled = false;
+    const stop = () => {
+      cancelled = true;
+      void connection.agent.notify(methods.agent.session.cancel, { sessionId });
+    };
+    const rewriting = { sessionId, text: "", stop };
+    this.rewriting = rewriting;
+    signal?.addEventListener("abort", stop);
+    try {
+      if (signal?.aborted) throw stopped();
+      const result = await connection.agent.request(methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text }] });
+      if (cancelled || result.stopReason === "cancelled") throw stopped();
+      return rewriting.text;
+    } finally {
+      signal?.removeEventListener("abort", stop);
+      if (this.rewriting === rewriting) this.rewriting = null;
+    }
+  }
+
+  /** The writing assistant's side conversation, started on the first rewrite and again after a dozen. */
+  private async assistantSession(connection: ClientConnection): Promise<string> {
+    if (this.assistant && this.assistant.uses < REWRITES_PER_SESSION) {
+      this.assistant.uses++;
+      return this.assistant.sessionId;
+    }
+    if (this.assistant) void connection.agent.request(methods.agent.session.close, { sessionId: this.assistant.sessionId }).catch(() => {});
+    // A folder of its own, so its conversations aren't listed with the project's, and it has no files to read.
+    const cwd = join(tmpdir(), "neo-manuscript-assistant");
+    await mkdir(cwd, { recursive: true });
+    const meta = assistantMeta(this.agent);
+    const session = await connection.agent.request(methods.agent.session.new, { cwd, mcpServers: [], ...(meta && { _meta: meta }) });
+    this.assistant = { sessionId: session.sessionId, uses: 1 };
+    // It writes with the model the user chose for the chat.
+    const chosen = this.chatModel();
+    const own = session.configOptions?.find((option) => option.id === chosen?.id);
+    if (chosen && own && own.type === "select" && own.currentValue !== chosen.value) {
+      await connection.agent.request(methods.agent.session.setConfigOption, { sessionId: session.sessionId, configId: chosen.id, value: chosen.value }).catch(() => {});
+    }
+    return session.sessionId;
+  }
+
+  /** The model the chat's conversation has now, from its last options. */
+  private chatModel(): { id: string; value: string } | null {
+    for (let index = this.events.length - 1; index >= 0; index--) {
+      const event = this.events[index]!;
+      if (event.type !== "config") continue;
+      const model = event.options.find((option) => option.category === "model" || option.id === "model");
+      return model && model.type === "select" ? { id: model.id, value: String(model.currentValue) } : null;
+    }
+    return null;
+  }
+
+  /** What the writing assistant says, gathered for the rewrite under way. */
+  private rewritten(update: SessionUpdate) {
+    if (!this.rewriting || update.sessionUpdate !== "agent_message_chunk" || update.content.type !== "text") return;
+    // pi-acp's startup notes come first in a new conversation.
+    if (this.agent === "pi" && this.rewriting.text === "" && /^pi v\d/.test(update.content.text)) return;
+    this.rewriting.text += update.content.text;
   }
 
   /** What the agent is told first: where it is, and how to build the PDF the user sees. */

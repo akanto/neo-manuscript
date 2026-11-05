@@ -69,6 +69,12 @@ bun run screenshots      # screenshots/*.png for Mirador's plugin store, from th
   writes go through the open documents. Agents build through `POST /agent/compile` (a `curl` line in the context
   added after the user's first message). Conversations resume with ACP `session/load`; projects open by real path
   because agents file sessions by it.
+- **Writing actions**: selecting a passage of four or more words (`view/assist.ts`; one to three get the synonyms)
+  offers Grammar, Rephrase, Shorten, Scientific, Clearer and an instruction of the user's own; `core/assist.ts` has the
+  prompts. In the desktop app the chat's agent answers in a side session on the same ACP connection (`rewrite()` in
+  `hosts/desktop/chat.ts`, `POST /chat/rewrite`): a folder of its own in the temp folder, and for Claude its own system
+  prompt, no tools and nothing kept, with the chat's model. The view shows the answer as a word diff to accept. Mirador
+  has no side session: the action goes to its agent as a message, and the agent changes the file.
 - **Agents (Mirador)**: `app_state`, `apply` (`replace`, `insert`, `replace_lines`, `set_text`) and `app_run compile`.
 - **Mirador's view**: the project is the workspace, and paths are named from it, as the desktop app names them from its
   folder. The view lists it with `listFiles` (again on `onFiles`), opens a file with `open` (after a running build ends,

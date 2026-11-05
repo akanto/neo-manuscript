@@ -18,6 +18,7 @@ import { tags } from "@lezer/highlight";
 import type { Problem } from "../core/build.ts";
 import { scan, type Token } from "./scan.ts";
 import { synonyms, type SynonymOptions } from "./synonyms.ts";
+import { assist, type AssistOptions } from "./assist.ts";
 import { visualMode, type FileReader, type PdfDrawer } from "./visual.ts";
 import { markdownLanguage, markdownVisual, mdBold, mdItalic, mdMath } from "./markdown.ts";
 
@@ -208,6 +209,8 @@ export interface EditorOptions {
   onTogglePreview: () => void;
   /** The synonym popup over a selected word; none without it. */
   synonyms: SynonymOptions | null;
+  /** The writing actions over a selected passage (grammar, rephrase, shorten…); none without them. */
+  assist: Omit<AssistOptions, "language"> | null;
   isRemote: (transaction: import("@codemirror/state").Transaction) => boolean;
 }
 
@@ -240,6 +243,7 @@ export function createEditor(options: EditorOptions): Editor {
         problemField,
         flashField,
         options.synonyms ? synonyms(options.synonyms) : [],
+        options.assist ? assist({ ...options.assist, language: markdown ? "markdown" : "latex" }) : [],
         keymap.of([
           { key: "Mod-b", run: markdown ? mdBold : bold },
           { key: "Mod-i", run: markdown ? mdItalic : italic },
