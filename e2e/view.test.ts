@@ -253,6 +253,33 @@ for (const setup of setups) describe.skipIf(!setup.run)(`the view ${setup.name}`
     await page.keyboard.press("Escape");
   });
 
+  test("⌘F finds in the file from anywhere, looking for the text selected in the PDF", async () => {
+    const span = root.locator(".textLayer span", { hasText: "Euler" }).first();
+    await span.waitFor({ timeout: 10_000 });
+    // A click in the PDF takes the focus there, as selecting in it does.
+    await span.click();
+    await span.evaluate((node) => {
+      const text = node.firstChild!;
+      const at = text.textContent!.indexOf("Euler");
+      const range = document.createRange();
+      range.setStart(text, at);
+      range.setEnd(text, at + "Euler".length);
+      getSelection()!.removeAllRanges();
+      getSelection()!.addRange(range);
+    });
+    await page.keyboard.press("Meta+f");
+    await root.locator(".cm-search [name=search]").waitFor({ timeout: 5_000 });
+    expect(await root.locator(".cm-search [name=search]").inputValue()).toBe("Euler");
+    await page.keyboard.press("Escape");
+    expect(await root.locator(".cm-search").count()).toBe(0);
+    // In the editor too: it looks for the word selected there.
+    expect(await selectWord("gradient")).toBe(true);
+    await page.keyboard.press("Meta+f");
+    await root.locator(".cm-search [name=search]").waitFor({ timeout: 5_000 });
+    expect(await root.locator(".cm-search [name=search]").inputValue()).toBe("gradient");
+    await page.keyboard.press("Escape");
+  });
+
   test("text selected in the PDF can be copied, and Ask asks about it with its source lines", async () => {
     const span = root.locator(".textLayer span", { hasText: "Euler" }).first();
     await span.waitFor({ timeout: 10_000 });

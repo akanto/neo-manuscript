@@ -1,5 +1,6 @@
 import { EditorSelection } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
+import { openSearchPanel, SearchQuery, setSearchQuery } from "@codemirror/search";
 import type { Author, DocumentState, HostBridge, TaskState } from "../core/host-api.ts";
 import { BUILD_FOLDER, DOWNLOADING_TECTONIC, FIRST_TECTONIC_BUILD, reportNamedIn, type BuildReport, type Problem } from "../core/build.ts";
 import type { TexDocument } from "../core/document.ts";
@@ -316,6 +317,25 @@ export function startView(host: HostBridge<TexDocument>) {
   );
   setLayout(layout);
   setScrollLock(scrollLock);
+
+  /**
+   * ⌘F finds in the open file wherever the focus is: the editor's own ⌘F only works in the editor, and Mirador's
+   * frame before its fix of sodre90/mirador#69 prevented the key's default, which the editor then left alone. Text selected in the PDF, or elsewhere in the page, is what it looks for; else the editor's selection.
+   * It listens before the editor does, as the editor's ⌘F would put the selection in its find field first.
+   */
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "f" || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || !editor) return;
+    const view = editor.view;
+    const selection = getSelection();
+    const outside = selection && !selection.isCollapsed && !view.dom.contains(selection.anchorNode);
+    const selected = outside ? selection.toString().trim().replace(/\s+/g, " ") : "";
+    event.preventDefault();
+    event.stopPropagation();
+    if (layout === "pdf") setLayout("split");
+    view.focus();
+    openSearchPanel(view);
+    if (selected && selected.length <= 200) view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: selected })) });
+  }, true);
 
   // --- The chat with the agent, for a host that has one; Ask goes to it ---------------------------------------------
 

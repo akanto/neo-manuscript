@@ -197,6 +197,21 @@ export const code = toggleCommand("texttt");
 
 // --- The editor --------------------------------------------------------------------------------------------------------
 
+/** The search panel's words, capitalized as the rest of the app's are. */
+const SEARCH_PHRASES: Record<string, string> = {
+  Find: "Find",
+  Replace: "Replace",
+  next: "Next",
+  previous: "Previous",
+  all: "All",
+  "match case": "Match case",
+  regexp: "Regexp",
+  "by word": "Whole word",
+  replace: "Replace",
+  "replace all": "Replace all",
+  close: "Close",
+};
+
 export interface EditorOptions {
   parent: HTMLElement;
   text: string;
@@ -231,6 +246,7 @@ export function createEditor(options: EditorOptions): Editor {
     state: EditorState.create({
       doc: options.text,
       extensions: [
+        EditorState.phrases.of(SEARCH_PHRASES),
         modeCompartment.of(modeExtension(options.mode)),
         history(),
         drawSelection(),
