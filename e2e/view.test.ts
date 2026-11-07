@@ -307,6 +307,53 @@ for (const setup of setups) describe.skipIf(!setup.run)(`the view ${setup.name}`
     expect(asked).toContain("fastest --- a fact we use in Section~\\ref{sec:method}.\nEuler's identity, $e^{i\\pi} + 1 = 0$");
   }, 30_000);
 
+  test("text selected in the PDF stays selected while a new build draws its pages anew", async () => {
+    const selected = () => root.locator(".pdf-scroll").evaluate(() => getSelection()?.toString() ?? "");
+    const compileButton = root.getByRole("button", { name: "▶ Compile" });
+    /** Builds again, with the pages drawn now marked, so that a page drawn by the new build can be told from them. */
+    const build = async () => {
+      await root.locator(".pdf-page canvas").evaluateAll((all) => all.forEach((canvas) => canvas.classList.add("before-build")));
+      await compileButton.evaluate((button: HTMLButtonElement) => button.click());
+    };
+    /** Waits for the build to end and its PDF's pages to be drawn. */
+    const built = async (...numbers: number[]) => {
+      await Promise.all(numbers.map(redrawn));
+      for (let tries = 0; tries < 100 && (await compileButton.isDisabled()); tries++) await Bun.sleep(100);
+      await Bun.sleep(300);
+    };
+    const redrawn = (number: number) => root.locator(`.pdf-page[data-page="${number}"] canvas:not(.before-build)`).waitFor({ timeout: 20_000 });
+
+    // Across two pages: the end on each page stays where it was, rather than going to the top of the page.
+    await root.locator('.pdf-page[data-page="2"] .textLayer span').first().waitFor({ timeout: 10_000 });
+    // A click in the PDF takes the focus there, as selecting in it does; else the editor puts its own selection back.
+    await root.locator('.pdf-page[data-page="1"] .textLayer span').first().click();
+    const across = await root.locator(".pdf-pages").evaluate((pages) => {
+      const [first, second] = [1, 2].map((number) => [...pages.querySelectorAll<HTMLElement>(`.pdf-page[data-page="${number}"] .textLayer span`)].filter((span) => span.textContent!.trim().length > 20));
+      const from = first!.at(-1)!.firstChild!;
+      const to = second![0]!.firstChild!;
+      getSelection()!.setBaseAndExtent(from, 0, to, to.textContent!.length);
+      return getSelection()!.toString();
+    });
+    expect(across.length).toBeGreaterThan(0);
+    await build();
+    await built(1, 2);
+    expect(await selected()).toBe(across);
+
+    // A build that ends while the pointer is pressed in a page, as during a drag, draws the page anew once the press
+    // ends, even when it ends without letting go, as when the selected text is dragged away.
+    await root.locator('.pdf-page[data-page="1"] .textLayer').dispatchEvent("pointerdown");
+    await build();
+    await root.locator('.pdf-page[data-page="1"][data-stale]').waitFor({ timeout: 20_000 });
+    await built();
+    expect(await root.locator('.pdf-page[data-page="1"] canvas:not(.before-build)').count()).toBe(0);
+    await root.locator(".pdf-scroll").evaluate(() => dispatchEvent(new PointerEvent("pointercancel")));
+    await redrawn(1);
+    await root.locator(".pdf-scroll").evaluate((scroller) => {
+      getSelection()!.removeAllRanges();
+      scroller.scrollTop = 0;
+    });
+  }, 60_000);
+
   test("the PDF scrolls with the editor while the lock is on", async () => {
     await root.getByRole("button", { name: "Split", exact: true }).click();
     const pdfTop = () => root.locator(".pdf-scroll").evaluate((element) => element.scrollTop);

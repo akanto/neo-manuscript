@@ -248,7 +248,15 @@ export class PdfViewer {
     if (generation !== this.generation || pdf !== this.pdf) return;
     const text = await this.textLayer(page);
     if (generation !== this.generation || pdf !== this.pdf) return;
+    // A drag selecting text goes on in the pages it is in; the new page takes its place when the drag ends.
+    if (this.pages.querySelector(".textLayer.selecting")) {
+      await pressEnded();
+      if (generation !== this.generation || pdf !== this.pdf) return;
+    }
+    const old = box.querySelector<HTMLDivElement>(".textLayer");
+    const kept = old ? keepSelection(old) : null;
     box.replaceChildren(canvas, ...(text ? [text] : []));
+    if (kept) restoreSelection(text, kept);
     delete box.dataset.stale;
   }
 
@@ -265,7 +273,7 @@ export class PdfViewer {
     container.append(Object.assign(document.createElement("div"), { className: "endOfContent" }));
     container.addEventListener("pointerdown", () => {
       container.classList.add("selecting");
-      addEventListener("pointerup", () => container.classList.remove("selecting"), { once: true });
+      void pressEnded().then(() => container.classList.remove("selecting"));
     });
     return container;
   }
@@ -318,4 +326,93 @@ export class PdfViewer {
       .join(" ");
     this.onPoint({ page: number, x, y: viewport.viewBox[3]! - y, text: line });
   }
+}
+
+/** Resolves when the press of the pointer ends: let go, cancelled (as by a drag of the text) or lost with the window's focus. */
+function pressEnded(): Promise<void> {
+  return new Promise((resolve) => {
+    const events = ["pointerup", "pointercancel", "blur"];
+    const end = () => {
+      for (const name of events) removeEventListener(name, end);
+      resolve();
+    };
+    for (const name of events) addEventListener(name, end);
+  });
+}
+
+/** A point in the document, as a range or a selection has its ends. */
+type Point = [Node, number];
+
+/**
+ * The part of the selection on a page, kept while the page is drawn anew: its text and how far into the page's text it
+ * starts, and the selection's ends that are on other pages.
+ */
+interface KeptSelection {
+  text: string;
+  start: number;
+  /** The selection's start when it is on another page, else null; and so its end. */
+  before: Point | null;
+  after: Point | null;
+  /** Whether the selection was made from its end back to its start. */
+  backward: boolean;
+}
+
+/** The selection, when an end of it is in a page's text layer; null when the page can be drawn anew without it. */
+function keepSelection(layer: HTMLElement): KeptSelection | null {
+  const selection = getSelection();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+  const range = selection.getRangeAt(0);
+  const startHere = layer.contains(range.startContainer);
+  const endHere = layer.contains(range.endContainer);
+  if (!startHere && !endHere) return null;
+  const part = document.createRange();
+  part.selectNodeContents(layer);
+  if (startHere) part.setStart(range.startContainer, range.startOffset);
+  if (endHere) part.setEnd(range.endContainer, range.endOffset);
+  const before = document.createRange();
+  before.setStart(layer, 0);
+  before.setEnd(part.startContainer, part.startOffset);
+  return {
+    text: part.toString(),
+    start: before.toString().length,
+    before: startHere ? null : [range.startContainer, range.startOffset],
+    after: endHere ? null : [range.endContainer, range.endOffset],
+    backward: selection.anchorNode === range.endContainer && selection.anchorOffset === range.endOffset,
+  };
+}
+
+/**
+ * Selects again what was selected on a page drawn anew: the same text, where it was or nearest to it, as the build may
+ * have moved it. When the text is no longer there the selection goes, rather than spread to the top of the page.
+ */
+function restoreSelection(layer: HTMLElement | null, kept: KeptSelection) {
+  const selection = getSelection()!;
+  const all = layer?.textContent ?? "";
+  let best = -1;
+  if (!kept.text) best = Math.min(kept.start, all.length);
+  else for (let at = all.indexOf(kept.text); at !== -1; at = all.indexOf(kept.text, at + 1)) {
+    if (best === -1 || Math.abs(at - kept.start) < Math.abs(best - kept.start)) best = at;
+  }
+  // A start at the very end of the page's text is the end of its last node, there being no next one.
+  const start = layer && best !== -1 ? kept.before ?? textPoint(layer, best, best === all.length) : null;
+  const end = layer && best !== -1 ? kept.after ?? textPoint(layer, best + kept.text.length, true) : null;
+  if (!start || !end || !inDocument(start) || !inDocument(end)) return void selection.removeAllRanges();
+  const [anchor, focus] = kept.backward ? [end, start] : [start, end];
+  selection.setBaseAndExtent(anchor[0], anchor[1], focus[0], focus[1]);
+}
+
+/** Whether a point is still in the document: its node there, and its offset in the node. */
+function inDocument([node, offset]: Point): boolean {
+  return node.isConnected && offset <= (node instanceof CharacterData ? node.length : node.childNodes.length);
+}
+
+/** The text node and offset at a count of characters into a layer's text; at a node's end, the next one's start unless `atEnd`. */
+function textPoint(layer: HTMLElement, offset: number, atEnd: boolean): Point | null {
+  const walker = document.createTreeWalker(layer, NodeFilter.SHOW_TEXT);
+  let left = offset;
+  for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+    if (atEnd ? left <= node.length : left < node.length) return [node, left];
+    left -= node.length;
+  }
+  return null;
 }
