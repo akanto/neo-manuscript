@@ -281,6 +281,12 @@ for (const setup of setups) describe.skipIf(!setup.run)(`the view ${setup.name}`
   });
 
   test("text selected in the PDF can be copied, and Ask asks about it with its source lines", async () => {
+    // The synonyms test's edit builds while the tests after it run. Its PDF, laid out during the drag, would move the
+    // text under the pointer, so the drag waits for that PDF to be drawn and the build to end.
+    await root.locator(".textLayer span", { hasText: "increases" }).first().waitFor({ timeout: 30_000 });
+    const compileButton = root.getByRole("button", { name: "▶ Compile" });
+    for (let tries = 0; tries < 100 && (await compileButton.isDisabled()); tries++) await Bun.sleep(100);
+    await Bun.sleep(300);
     const span = root.locator(".textLayer span", { hasText: "Euler" }).first();
     await span.waitFor({ timeout: 10_000 });
     const box = (await span.boundingBox())!;
