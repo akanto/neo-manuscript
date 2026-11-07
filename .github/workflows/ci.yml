@@ -34,7 +34,7 @@ jobs:
           sudo /Library/TeX/texbin/tlmgr install latexmk
 
       # The packages Tectonic fetches on its first build.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: ~/Library/Caches/Tectonic
           key: tectonic-${{ runner.os }}-${{ hashFiles('examples/**', 'tests/**', 'e2e/**') }}
@@ -45,8 +45,20 @@ jobs:
       - run: bun run app:prepare
       - run: bun run typecheck
       - run: bun test tests
-      # Builds the Mirador plugin's view, then runs it in the runner's Chrome.
+
+      # Mirador's canvas code (MIT), for the e2e tests that frame the view in WebKit as Mirador frames it.
+      - uses: actions/checkout@v5
+        with:
+          repository: sodre90/mirador
+          ref: v0.12.0
+          path: .mirador
+          sparse-checkout: shared
+      - run: bunx playwright-core install webkit
+
+      # Builds the Mirador plugin's view, then runs it in the runner's Chrome, and in WebKit framed as Mirador frames it.
       - run: bun run e2e
+        env:
+          MIRADOR_CANVAS: ${{ github.workspace }}/.mirador/shared/canvas-document.ts
 
   app:
     runs-on: macos-15
@@ -61,7 +73,7 @@ jobs:
       - run: bun run app:prepare
       - run: bun run app:build
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: NeoManuscript-${{ github.sha }}
           path: artifacts/*.dmg

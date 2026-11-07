@@ -6,6 +6,7 @@ video/out/
 build/
 artifacts/
 .cottontail-tmp/
+.mirador/
 .DS_Store
 
 # Beads / Dolt files (added by bd init)
