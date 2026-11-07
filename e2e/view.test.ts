@@ -284,7 +284,9 @@ for (const setup of setups) describe.skipIf(!setup.run)(`the view ${setup.name}`
     const span = root.locator(".textLayer span", { hasText: "Euler" }).first();
     await span.waitFor({ timeout: 10_000 });
     const box = (await span.boundingBox())!;
-    await page.mouse.move(box.x + 1, box.y + box.height / 2);
+    // A few pixels in: Chrome starts no selection at the first pixel of a span the text layer narrows (its --scale-x
+    // below 1), which this line's span is once an earlier test's edit is built.
+    await page.mouse.move(box.x + 4, box.y + box.height / 2);
     await page.mouse.down();
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 5 });
     await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, { steps: 5 });
