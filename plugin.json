@@ -1,7 +1,7 @@
 {
   "name": "neo-manuscript",
   "title": "NeoManuscript",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "api": 6,
   "app": {
     "host": "hosts/mirador/host.ts",
