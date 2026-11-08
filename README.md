@@ -66,17 +66,9 @@ first chat and asks you to sign in with your Claude account. To use
 
 ### In Mirador
 
-NeoManuscript is also a plugin for [Mirador](https://github.com/sodre90/mirador) (plugin API 6). Mirador builds it with
-its own Bun; to install it by hand, you need [Bun](https://bun.sh):
-
-```bash
-git clone https://github.com/akanto/neo-manuscript && cd neo-manuscript
-bun install && bun run build
-ln -s "$PWD" ~/.mirador/plugins/neo-manuscript
-```
-
-Restart Mirador and ask its agent to open a `.tex` or `.md` file in NeoManuscript. The workspace's files are listed on
-the left; click one to edit it. Builds work as in the app; the chat is Mirador's own.
+NeoManuscript is also a plugin for [Mirador](https://github.com/sodre90/mirador) (plugin API 6). Install it from
+Mirador's plugin store, then ask its agent to open a `.tex` or `.md` file in NeoManuscript. The workspace's files are
+listed on the left; click one to edit it. Builds work as in the app; the chat is Mirador's own.
 
 ### Building from source
 

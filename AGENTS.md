@@ -21,6 +21,14 @@ bun run screenshots      # screenshots/*.png for Mirador's plugin store, from th
 `electrobun dev` and `electrobun build` share a lock: stop a running dev app before a stable build.
 `NEO_DEBUG=1 bun run app` prints the page's URL and every request the window makes.
 
+To try a checkout in Mirador instead of the store's version, build the view and link the checkout as a plugin, then
+restart Mirador:
+
+```bash
+bun run build
+ln -s "$PWD" ~/.mirador/plugins/neo-manuscript
+```
+
 ## Layout
 
 - `core/`: no host in it. `ops.ts` (operations and their inverses), `compile.ts` (the build), `describe.ts` (the
