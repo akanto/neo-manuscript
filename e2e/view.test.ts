@@ -367,6 +367,32 @@ for (const setup of setups) describe.skipIf(!setup.run)(`the view ${setup.name}`
     });
   }, 60_000);
 
+  test("a release the view never saw ends the press once the pointer moves with no button held", async () => {
+    const compileButton = root.getByRole("button", { name: "▶ Compile" });
+    await root.locator('.pdf-page[data-page="1"] .textLayer span').first().waitFor({ timeout: 10_000 });
+    for (let tries = 0; tries < 100 && (await compileButton.isDisabled()); tries++) await Bun.sleep(100);
+    // The test before leaves pages to draw after its scroll back to the top.
+    await Bun.sleep(1_000);
+    await root.locator(".pdf-page canvas").evaluateAll((all) => all.forEach((canvas) => canvas.classList.add("before-build")));
+    // The press begins, and its release is lost: no pointerup reaches the view.
+    await root.locator('.pdf-page[data-page="1"] .textLayer').dispatchEvent("pointerdown");
+    await compileButton.evaluate((button: HTMLButtonElement) => button.click());
+    await Bun.sleep(300);
+    for (let tries = 0; tries < 100 && (await compileButton.isDisabled()); tries++) await Bun.sleep(100);
+    await Bun.sleep(300);
+    // The new PDF waits for the press: the old pages are still there, and the text layer is still marked.
+    expect(await root.locator('.pdf-page[data-page="1"] canvas:not(.before-build)').count()).toBe(0);
+    expect(await root.locator(".textLayer.selecting").count()).toBeGreaterThan(0);
+    // A move with a button held doesn't end it.
+    await root.locator(".pdf-scroll").evaluate(() => dispatchEvent(new PointerEvent("pointermove", { buttons: 1 })));
+    await Bun.sleep(300);
+    expect(await root.locator(".textLayer.selecting").count()).toBeGreaterThan(0);
+    // The pointer seen with no button held ends it, and the new PDF shows.
+    await root.locator(".pdf-scroll").evaluate(() => dispatchEvent(new PointerEvent("pointermove", { buttons: 0 })));
+    await root.locator('.pdf-page[data-page="1"] canvas:not(.before-build)').waitFor({ timeout: 20_000 });
+    expect(await root.locator(".textLayer.selecting").count()).toBe(0);
+  }, 60_000);
+
   test("the PDF scrolls with the editor while the lock is on", async () => {
     await root.getByRole("button", { name: "Split", exact: true }).click();
     const pdfTop = () => root.locator(".pdf-scroll").evaluate((element) => element.scrollTop);

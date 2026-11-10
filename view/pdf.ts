@@ -175,7 +175,8 @@ export class PdfViewer {
     this.pdf = pdf;
     await this.layout(true);
     if (previous) void previous.destroy();
-    return true;
+    // A newer PDF may have come while the layout waited for a drag to end, and shows in this one's place.
+    return this.pdf === pdf;
   }
 
   setZoom(zoom: Zoom | "in" | "out") {
@@ -206,14 +207,19 @@ export class PdfViewer {
     const first = await pdf.getPage(1);
     const scale = await this.scaleFor(first);
     if (generation !== this.generation) return;
+    const sizes = await Promise.all(Array.from({ length: pdf.numPages }, (_, index) => pdf.getPage(index + 1).then((page) => page.getViewport({ scale }))));
+    if (generation !== this.generation) return;
+    // A drag may have begun while the awaits above ran; the sizes, scale and scroll wait for it to end too. Nothing is
+    // awaited after this, so they change together.
+    if (this.pages.querySelector(".textLayer.selecting")) {
+      await pressEnded();
+      if (generation !== this.generation || pdf !== this.pdf) return;
+    }
     const scroller = this.element;
     const ratio = scroller.scrollHeight > 0 ? scroller.scrollTop / scroller.scrollHeight : 0;
     const left = scroller.scrollWidth > 0 ? scroller.scrollLeft / scroller.scrollWidth : 0;
     this.scaleUsed = scale;
     this.onZoom(`${Math.round(scale * 100)}%`);
-
-    const sizes = await Promise.all(Array.from({ length: pdf.numPages }, (_, index) => pdf.getPage(index + 1).then((page) => page.getViewport({ scale }))));
-    if (generation !== this.generation) return;
     const existing = [...this.pages.children] as HTMLDivElement[];
     existing.slice(pdf.numPages).forEach((box) => {
       this.observer.unobserve(box);
@@ -243,7 +249,8 @@ export class PdfViewer {
 
   private async drawPage(number: number) {
     const pdf = this.pdf;
-    if (!pdf || this.drawn.get(number) === this.generation) return;
+    // While a new PDF's layout waits for a drag to end, the boxes are still the old PDF's, which may have more pages.
+    if (!pdf || number > pdf.numPages || this.drawn.get(number) === this.generation) return;
     const generation = this.generation;
     this.drawn.set(number, generation);
     const box = this.pages.children[number - 1] as HTMLDivElement | undefined;
@@ -342,15 +349,30 @@ export class PdfViewer {
   }
 }
 
-/** Resolves when the press of the pointer ends: let go, cancelled (as by a drag of the text) or lost with the window's focus. */
+/**
+ * Resolves when the press of the pointer ends: let go, cancelled (as by a drag of the text), lost with the window's
+ * focus or the page being hidden, or the pointer seen again with no button held (a release outside a frame sends no
+ * event into it). There is no timeout, as one would cut a real, long drag short.
+ */
 function pressEnded(): Promise<void> {
   return new Promise((resolve) => {
-    const events = ["pointerup", "pointercancel", "blur"];
+    const always = ["pointerup", "pointercancel", "blur"];
     const end = () => {
-      for (const name of events) removeEventListener(name, end);
+      for (const name of always) removeEventListener(name, end);
+      removeEventListener("pointermove", moved);
+      document.removeEventListener("visibilitychange", hidden);
       resolve();
     };
-    for (const name of events) addEventListener(name, end);
+    const moved = (event: Event) => {
+      if ((event as PointerEvent).buttons === 0) end();
+    };
+    const hidden = () => {
+      if (document.hidden) end();
+    };
+    for (const name of always) addEventListener(name, end);
+    // Only pointermove: pointerover and pointerenter also fire when the page under a still pointer is replaced.
+    addEventListener("pointermove", moved);
+    document.addEventListener("visibilitychange", hidden);
   });
 }
 
