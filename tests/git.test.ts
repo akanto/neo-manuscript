@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { changedSince, fileAt, gitDir, gitRefs } from "../core/git.ts";
+import { changedSince, fileAt, gitCommonDir, gitDir, gitRefs } from "../core/git.ts";
 
 const hasGit = Bun.which("git") !== null;
 
@@ -109,5 +109,15 @@ describe.skipIf(!hasGit)("git", () => {
     await expect(fileAt(repo, "--output=x", "main.tex")).rejects.toThrow();
     await expect(changedSince(repo, "a b")).rejects.toThrow();
     await expect(changedSince(repo, "")).rejects.toThrow();
+  });
+
+  test("in a linked worktree gitDir is the worktree's folder and the common dir is the main .git", async () => {
+    const linked = join(root, "linked");
+    await run(repo, "worktree", "add", "-b", "linked-branch", linked);
+    expect(await gitDir(linked)).toBe(join(repo, ".git", "worktrees", "linked"));
+    expect(await gitCommonDir(linked)).toBe(join(repo, ".git"));
+    expect(await gitCommonDir(repo)).toBe(join(repo, ".git"));
+    expect(await gitCommonDir(join(repo, "sub"))).toBe(join(repo, ".git"));
+    expect(await gitCommonDir(plain)).toBeNull();
   });
 });

@@ -86,8 +86,8 @@ ln -s "$PWD" ~/.mirador/plugins/neo-manuscript
 - **Change highlight**: the toolbar's Changes toggle (`view/changes.ts`) marks the words of the open file added or
   changed since a baseline (`changedRanges` in `core/diff.ts`: removed words and whitespace leave no mark), and dots
   the changed files in the file tree. The baseline is the last commit or a tag, for a host with the `ProjectBridge`'s
-  git methods (the desktop app, through `core/git.ts` and `/git/*`; it watches the git folder and sends a `git` event
-  when HEAD or the tags move), else the text as the view first opened the file: in Mirador, whose plugin API reads no
+  git methods (the desktop app, through `core/git.ts` and `/git/*`; it watches the git folder, and a linked worktree's
+  common one, and sends a `git` event when HEAD or the tags move), else the text as the view first opened the file: in Mirador, whose plugin API reads no
   git yet, and in a folder that isn't a repository.
 - **Agents (Mirador)**: `app_state`, `apply` (`replace`, `insert`, `replace_lines`, `set_text`) and `app_run compile`.
 - **Mirador's view**: the project is the workspace, and paths are named from it, as the desktop app names them from its

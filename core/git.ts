@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { searchPath } from "./compile.ts";
 import type { GitRefs } from "./host-api.ts";
 import { isProjectPath } from "./project.ts";
@@ -64,6 +65,17 @@ function checkRef(ref: string) {
 export async function gitDir(folder: string): Promise<string | null> {
   const run = await git(folder, ["rev-parse", "--absolute-git-dir"]);
   return run?.ok ? run.out.trim() || null : null;
+}
+
+/**
+ * The repository's common git folder, absolute: where refs/tags and packed-refs live. It is the .git folder itself,
+ * except in a linked worktree, where gitDir is a folder inside it. Null when the folder isn't in a repository.
+ */
+export async function gitCommonDir(folder: string): Promise<string | null> {
+  const run = await git(folder, ["rev-parse", "--git-common-dir"]);
+  const out = run?.ok ? run.out.trim() : "";
+  // Git prints a path relative to the folder in some cases, so resolve it here.
+  return out ? resolve(folder, out) : null;
 }
 
 /** HEAD's commit and the tags, newest first; null when the folder isn't in a git repository. */

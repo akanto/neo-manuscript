@@ -3,7 +3,7 @@ import { mkdir, readFile, realpath, rename, stat, writeFile } from "node:fs/prom
 import { basename, dirname, join, sep } from "node:path";
 import { compile } from "../../core/compile.ts";
 import { NEW_DOCUMENT, parseDocument, type TexDocument } from "../../core/document.ts";
-import { changedSince, fileAt, gitDir, gitRefs } from "../../core/git.ts";
+import { changedSince, fileAt, gitCommonDir, gitDir, gitRefs } from "../../core/git.ts";
 import type { Author, DocumentState, GitRefs, TaskState } from "../../core/host-api.ts";
 import { listProject } from "../../core/project-files.ts";
 import { firstFileOf, isHidden, isProjectPath, isTextFile, kindOf, type ProjectEntry, type ProjectState } from "../../core/project.ts";
@@ -15,8 +15,8 @@ const SETTLE_MS = 150;
 /** How long the git folder has to stay still before the git listeners are told. */
 const GIT_SETTLE_MS = 300;
 
-/** Whether a path in a git folder is one that moves HEAD or the tags. */
-const isGitRefPath = (path: string) => /^(HEAD|packed-refs|refs(\/|$))/.test(path);
+/** Whether a path in a git folder is one that moves when HEAD or a tag does: HEAD, the refs, packed or reftable. */
+export const isGitRefPath = (path: string) => /^(HEAD|packed-refs|refs(\/|$)|reftable(\/|$))/.test(path);
 
 export interface ProjectOptions {
   /** The main file the user chose before, if any. */
@@ -54,10 +54,13 @@ export class ProjectHost {
   private listTimer: ReturnType<typeof setTimeout> | null = null;
   private stopListening: (() => void) | null = null;
   private gitListeners = new Set<() => void>();
-  private gitWatcher: FSWatcher | null = null;
+  private gitWatchers: FSWatcher[] = [];
   private gitTimer: ReturnType<typeof setTimeout> | null = null;
-  /** The repository's git folder when it is inside the project folder, as a path from it; the watcher then sees it. */
-  private innerGitDir: string | null = null;
+  /**
+   * The repository's git folders inside the project folder (its own, and the common one of a linked worktree), as
+   * paths from it; the folder's watcher sees them.
+   */
+  private innerGitDirs: string[] = [];
   private closed = false;
   private gitWatching: Promise<void> | null = null;
   /** Called when what the project remembers changes. */
@@ -249,8 +252,9 @@ export class ProjectHost {
     const changed = new Set<string>();
     this.watcher = watch(this.folder, { recursive: true }, (_event, name) => {
       const path = name?.toString().split(/[\\/]/).join("/") ?? null;
-      if (path && this.innerGitDir !== null && path.startsWith(`${this.innerGitDir}/`)) {
-        if (isGitRefPath(path.slice(this.innerGitDir.length + 1))) this.gitChanged();
+      const inner = path ? this.innerGitDirs.find((dir) => path.startsWith(`${dir}/`)) : undefined;
+      if (path && inner !== undefined) {
+        if (isGitRefPath(path.slice(inner.length + 1))) this.gitChanged();
         return;
       }
       if (path && path.split("/").some(isHidden)) return;
@@ -298,19 +302,29 @@ export class ProjectHost {
     }, GIT_SETTLE_MS);
   }
 
-  /** Finds the repository's git folder and watches it for moves of HEAD and the tags; nothing happens without one. */
+  /**
+   * Finds the repository's git folder, and the common one when this is a linked worktree (tags are made there), and
+   * watches them for moves of HEAD and the tags; nothing happens without a repository.
+   */
   private async watchGit() {
     try {
+      const dirs = new Set<string>();
       const dir = await gitDir(this.folder);
-      if (!dir || this.closed) return;
-      const inside = dir.startsWith(this.folder + sep);
-      if (inside) {
-        this.innerGitDir = dir.slice(this.folder.length + 1).split(sep).join("/");
-        return;
+      if (dir) dirs.add(dir);
+      const common = dir ? await gitCommonDir(this.folder) : null;
+      if (common) dirs.add(common);
+      if (this.closed) return;
+      for (const dir of dirs) {
+        if (dir.startsWith(this.folder + sep)) {
+          this.innerGitDirs.push(dir.slice(this.folder.length + 1).split(sep).join("/"));
+          continue;
+        }
+        this.gitWatchers.push(
+          watch(dir, { recursive: true }, (_event, name) => {
+            if (name && isGitRefPath(name.toString().split(/[\\/]/).join("/"))) this.gitChanged();
+          }),
+        );
       }
-      this.gitWatcher = watch(dir, { recursive: true }, (_event, name) => {
-        if (name && isGitRefPath(name.toString().split(/[\\/]/).join("/"))) this.gitChanged();
-      });
     } catch {
       // Without a git folder to watch, the change highlight just doesn't follow commits.
     }
@@ -372,7 +386,7 @@ export class ProjectHost {
   close() {
     this.closed = true;
     this.watcher?.close();
-    this.gitWatcher?.close();
+    for (const watcher of this.gitWatchers) watcher.close();
     if (this.gitTimer) clearTimeout(this.gitTimer);
     this.gitListeners.clear();
     if (this.listTimer) clearTimeout(this.listTimer);
