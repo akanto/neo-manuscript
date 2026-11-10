@@ -62,6 +62,8 @@ export class PdfViewer {
   private observer: IntersectionObserver;
   private drawn = new Map<number, number>();
   private generation = 0;
+  /** Counts the PDFs given to show, so that one overtaken while it waited for a drag doesn't show. */
+  private shows = 0;
   private wantedPlace: { place: PagePlace; until: number } | null = null;
   onZoom: (label: string) => void = () => {};
   onPoint: (point: PdfPoint) => void = () => {};
@@ -154,14 +156,26 @@ export class PdfViewer {
     this.element.scrollTop = Math.max(0, offset + wanted.place.y * this.scaleUsed - PLACE_MARGIN);
   }
 
-  async show(bytes: ArrayBuffer) {
+  /** Shows a PDF in place of the one shown; resolves to false when a newer one took its place before it showed. */
+  async show(bytes: ArrayBuffer): Promise<boolean> {
     const loading = open(bytes);
     const pdf = await loading.promise;
+    // Counted once it reads, so that a newer PDF that doesn't read can't keep this one from showing.
+    const ticket = ++this.shows;
+    // A drag selecting text goes on over the old pages: the new sizes, scale and scroll wait for it to end, so that the
+    // text under the pointer doesn't move. The caller's scroll to follow the editor waits with it.
+    if (this.pages.querySelector(".textLayer.selecting")) await pressEnded();
+    // A newer PDF came while this one waited; it shows in this one's place.
+    if (ticket !== this.shows) {
+      void loading.destroy();
+      return false;
+    }
     const previous = this.loading;
     this.loading = loading;
     this.pdf = pdf;
     await this.layout(true);
     if (previous) void previous.destroy();
+    return true;
   }
 
   setZoom(zoom: Zoom | "in" | "out") {

@@ -743,7 +743,7 @@ export function startView(host: HostBridge<TexDocument>) {
     if (report.pdf && report.at > shownReport) {
       shownReport = report.at;
       const bytes = await (await host.readFile(report.pdf)).arrayBuffer();
-      await viewer.show(bytes);
+      if (!(await viewer.show(bytes))) return;
       synctexData = await loadSynctex(report);
       retag();
       followEditor();

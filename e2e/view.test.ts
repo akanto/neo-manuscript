@@ -347,13 +347,18 @@ for (const setup of setups) describe.skipIf(!setup.run)(`the view ${setup.name}`
     await built(1, 2);
     expect(await selected()).toBe(across);
 
-    // A build that ends while the pointer is pressed in a page, as during a drag, draws the page anew once the press
-    // ends, even when it ends without letting go, as when the selected text is dragged away.
+    // A build that ends while the pointer is pressed in a page, as during a drag, leaves the old pages as they are, laid
+    // out and scrolled as they were, and shows the new PDF once the press ends, even when it ends without letting go,
+    // as when the selected text is dragged away.
     await root.locator('.pdf-page[data-page="1"] .textLayer').dispatchEvent("pointerdown");
+    const scrolled = await root.locator(".pdf-scroll").evaluate((scroller) => scroller.scrollTop);
     await build();
-    await root.locator('.pdf-page[data-page="1"][data-stale]').waitFor({ timeout: 20_000 });
     await built();
+    // Time for the view to read the new PDF, which waits for the press.
+    await Bun.sleep(1500);
+    expect(await root.locator(".pdf-page[data-stale]").count()).toBe(0);
     expect(await root.locator('.pdf-page[data-page="1"] canvas:not(.before-build)').count()).toBe(0);
+    await expect(root.locator(".pdf-scroll").evaluate((scroller) => scroller.scrollTop)).resolves.toBe(scrolled);
     await root.locator(".pdf-scroll").evaluate(() => dispatchEvent(new PointerEvent("pointercancel")));
     await redrawn(1);
     await root.locator(".pdf-scroll").evaluate((scroller) => {
