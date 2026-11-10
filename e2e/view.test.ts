@@ -417,6 +417,30 @@ for (const setup of setups) describe.skipIf(!setup.run)(`the view ${setup.name}`
     await page.keyboard.press("End");
     await page.keyboard.type(" Freshly", { delay: 15 });
     await root.locator(".cm-changed", { hasText: "Freshly" }).first().waitFor({ timeout: 5000 });
+    // Only the command around a word changes, which Visual mode hides: the mark goes to the word it wraps.
+    await root.getByRole("button", { name: "Source" }).click();
+    await root.locator(".cm-line", { hasText: "\\emph{emphasis}" }).click();
+    // Selects "emph" in the line, which may wrap, through the page's own selection.
+    await root.locator(".cm-content").evaluate((content) => {
+      const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const at = (node as Text).data.indexOf("\\emph");
+        if (at < 0) continue;
+        const range = document.createRange();
+        range.setStart(node, at + 1);
+        range.setEnd(node, at + 5);
+        const selection = window.getSelection()!;
+        selection.removeAllRanges();
+        selection.addRange(range);
+        return;
+      }
+      throw new Error("no emph in the source");
+    });
+    await page.keyboard.type("textbf", { delay: 15 });
+    await root.getByRole("button", { name: "Visual" }).click();
+    // Visual mode shows the markup under the cursor, so the cursor goes elsewhere.
+    await root.locator(".cm-line", { hasText: "links five constants" }).click();
+    await root.locator(".cm-changed", { hasText: "emphasis" }).first().waitFor({ timeout: 5000 });
     await root.locator(".changes-toggle").click();
     await expect(root.locator(".cm-changed").count()).resolves.toBe(0);
     await expect(root.locator(".changed-dot").count()).resolves.toBe(0);

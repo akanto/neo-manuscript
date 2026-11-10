@@ -1,7 +1,8 @@
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { searchPath } from "./compile.ts";
 import type { GitRefs } from "./host-api.ts";
-import { isProjectPath } from "./project.ts";
+import { changedRanges } from "./diff.ts";
+import { isProjectPath, isTextFile } from "./project.ts";
 
 /** Refs git is asked about: names, SHAs and forms like HEAD~1; never an option or anything with spaces. */
 const SAFE_REF = /^[A-Za-z0-9._/@{}^~-]+$/;
@@ -106,9 +107,12 @@ export async function fileAt(folder: string, ref: string, path: string): Promise
   throw new Error(run.err.trim() || `git couldn't show ${path} at ${ref}`);
 }
 
+/** How many files `changedSince` reads at once. */
+const READ_BATCH = 8;
+
 /**
  * The project's files that differ from a ref on disk: changed, added, and untracked but not ignored. As in the editor's
- * marks, changes of whitespace alone don't count, and files deleted since aren't listed.
+ * marks, changes of whitespace alone and removed words don't count, and files deleted since aren't listed.
  */
 export async function changedSince(folder: string, ref: string): Promise<string[]> {
   checkRef(ref);
@@ -116,7 +120,25 @@ export async function changedSince(folder: string, ref: string): Promise<string[
   const diff = await git(folder, ["diff", ...flags, "--end-of-options", ref, "--"]);
   if (!diff) return [];
   if (!diff.ok) throw new Error(diff.err.trim() || `git couldn't compare with ${ref}`);
+  const tracked = [...new Set(diff.out.split("\0").filter((name) => name && isProjectPath(name)))];
+  // The diff still counts a line break moved inside a paragraph. A text file stays only if the editor would mark words
+  // in it; other files, as PDFs and pictures, stay without being read.
+  const differs = async (name: string): Promise<boolean> => {
+    if (!isTextFile(name)) return true;
+    try {
+      const [before, now] = await Promise.all([fileAt(folder, ref, name), Bun.file(join(folder, name)).text()]);
+      return before === null || changedRanges(before, now).length > 0;
+    } catch {
+      return true;
+    }
+  };
+  const kept: string[] = [];
+  for (let i = 0; i < tracked.length; i += READ_BATCH) {
+    const batch = tracked.slice(i, i + READ_BATCH);
+    const differing = await Promise.all(batch.map(differs));
+    batch.forEach((name, index) => differing[index] && kept.push(name));
+  }
   const others = await git(folder, ["ls-files", "--others", "--exclude-standard", "-z"]);
-  const names = [...diff.out.split("\0"), ...(others?.ok ? others.out.split("\0") : [])];
-  return [...new Set(names.filter((name) => name && isProjectPath(name)))];
+  const untracked = (others?.ok ? others.out.split("\0") : []).filter((name) => name && isProjectPath(name));
+  return [...new Set([...kept, ...untracked])];
 }

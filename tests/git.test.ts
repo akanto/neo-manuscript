@@ -104,6 +104,26 @@ describe.skipIf(!hasGit)("git", () => {
     expect(await Bun.file(marker).exists()).toBe(false);
   });
 
+  test("changedSince leaves out a file whose line breaks moved, and keeps one whose words changed", async () => {
+    const reflowed = join(root, "reflowed");
+    await mkdir(reflowed);
+    await run(reflowed, "init");
+    await run(reflowed, "config", "user.name", "Test");
+    await run(reflowed, "config", "user.email", "test@example.com");
+    await writeFile(join(reflowed, "flow.tex"), "a b c\n");
+    await writeFile(join(reflowed, "edit.tex"), "a b c\n");
+    await writeFile(join(reflowed, "dots.tex"), "x.y z\n");
+    await writeFile(join(reflowed, "cut.tex"), "a b c\n");
+    await run(reflowed, "add", ".");
+    await run(reflowed, "commit", "-m", "first");
+    await writeFile(join(reflowed, "flow.tex"), "a b\nc\n");
+    await writeFile(join(reflowed, "edit.tex"), "a b\nd\n");
+    // As in the editor: a space put in after a full stop isn't a changed word, and neither is a removed one.
+    await writeFile(join(reflowed, "dots.tex"), "x. y\nz\n");
+    await writeFile(join(reflowed, "cut.tex"), "a c\n");
+    expect(await changedSince(reflowed, "HEAD")).toEqual(["edit.tex"]);
+  });
+
   test("refs that could be options or odd text are refused", async () => {
     await expect(changedSince(repo, "--output=x")).rejects.toThrow();
     await expect(fileAt(repo, "--output=x", "main.tex")).rejects.toThrow();

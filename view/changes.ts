@@ -1,4 +1,4 @@
-import { StateEffect, StateField, type EditorState, type Extension } from "@codemirror/state";
+import { StateEffect, StateField, type EditorState, type Extension, type RangeSet } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { changedRanges } from "../core/diff.ts";
 import type { GitRefs, ProjectBridge } from "../core/host-api.ts";
@@ -27,9 +27,59 @@ const changesField = StateField.define<Range[]>({
 
 const changeMark = Decoration.mark({ class: "cm-changed" });
 
+/** The parts of `from..to` that Visual mode hides with no widget (the commands around bold text), in order. */
+function hiddenParts(atomic: RangeSet<Decoration>[], from: number, to: number): Range[] {
+  const parts: Range[] = [];
+  for (const set of atomic) {
+    set.between(from, to, (start, end, value) => {
+      if (value instanceof Decoration && !value.spec.widget && end > start) parts.push({ from: Math.max(start, from), to: Math.min(end, to) });
+    });
+  }
+  return parts.sort((a, b) => a.from - b.from);
+}
+
+/** Whether `from..to` has text in sight: something that isn't whitespace, nor hidden with no widget. */
+function showsText(view: EditorView, atomic: RangeSet<Decoration>[], from: number, to: number): boolean {
+  const doc = view.state.doc;
+  let at = from;
+  for (const part of hiddenParts(atomic, from, to)) {
+    if (part.from > at && /\S/.test(doc.sliceString(at, part.from))) return true;
+    at = Math.max(at, part.to);
+  }
+  return at < to && /\S/.test(doc.sliceString(at, to));
+}
+
+/**
+ * A mark with no text in sight, as when only commands changed (`\emph{x}` to `\textbf{x}`), spread to the text they
+ * wrap or stand next to on the line: the word after them, else the word before. Left as it is when the line has none.
+ */
+function spreadToText(view: EditorView, atomic: RangeSet<Decoration>[], from: number, to: number): Range {
+  const doc = view.state.doc;
+  const line = doc.lineAt(from);
+  const hidden = hiddenParts(atomic, line.from, line.to);
+  const isHidden = (position: number) => hidden.some((part) => part.from <= position && position < part.to);
+  const sight = (position: number) => !isHidden(position) && /\S/.test(doc.sliceString(position, position + 1));
+  // The word after: skip what isn't in sight, then go on through the word, hidden commands in it included.
+  let i = to;
+  while (i < line.to && !sight(i)) i++;
+  if (i < line.to) {
+    let last = i + 1;
+    for (i++; i < line.to && (isHidden(i) || sight(i)); i++) if (sight(i)) last = i + 1;
+    return { from, to: last };
+  }
+  // The word before.
+  i = from - 1;
+  while (i >= line.from && !sight(i)) i--;
+  if (i < line.from) return { from, to };
+  let first = i;
+  for (i--; i >= line.from && (isHidden(i) || sight(i)); i--) if (sight(i)) first = i;
+  return { from: first, to };
+}
+
 /**
  * The marks, drawn over what is in sight. In Visual mode a mark that reaches into a drawn widget (math, a citation)
- * covers the whole widget, as a mark inside it wouldn't show.
+ * covers the whole widget, as a mark inside it wouldn't show. A mark that would be all hidden commands is spread to the
+ * text beside them.
  */
 const changesPlugin = ViewPlugin.fromClass(
   class {
@@ -48,8 +98,7 @@ const changesPlugin = ViewPlugin.fromClass(
       if (ranges.length === 0) return Decoration.none;
       const { from: top, to: bottom } = view.viewport;
       const atomic = view.state.facet(EditorView.atomicRanges).map((source) => source(view));
-      const marks = [];
-      let last: Range | null = null;
+      const widened: Range[] = [];
       for (const range of ranges) {
         if (range.to < top || range.from > bottom) continue;
         let { from, to } = range;
@@ -61,8 +110,16 @@ const changesPlugin = ViewPlugin.fromClass(
             }
           });
         }
-        if (last && from <= last.to) last.to = Math.max(last.to, to);
-        else marks.push((last = { from, to }));
+        if (!showsText(view, atomic, from, to)) ({ from, to } = spreadToText(view, atomic, from, to));
+        widened.push({ from, to });
+      }
+      // A mark spread back to the word before may now start before earlier ones: sorted again, and overlaps joined.
+      widened.sort((a, b) => a.from - b.from);
+      const marks: Range[] = [];
+      for (const range of widened) {
+        const last = marks.at(-1);
+        if (last && range.from <= last.to) last.to = Math.max(last.to, range.to);
+        else marks.push({ ...range });
       }
       return Decoration.set(marks.map(({ from, to }) => changeMark.range(from, to)));
     }
