@@ -8,6 +8,7 @@ import DOMPurify from "dompurify";
 import katex from "katex";
 import { marked, type Token, type TokensList } from "marked";
 import type { FileReader } from "./visual.ts";
+import { blockWidget, setChanges } from "./changes.ts";
 
 /**
  * Markdown: the language for Source and Visual mode, the editing commands, Visual mode (the same text drawn as the
@@ -518,6 +519,7 @@ function build(state: EditorState): Built {
   const atomic: Range<Decoration>[] = [];
   const hide = (from: number, to: number, widget?: WidgetType, block = false) => {
     if (from >= to && !widget) return;
+    if (widget && block) widget = blockWidget(state, from, to, widget);
     const decoration = Decoration.replace(widget ? { widget, block } : {});
     decorations.push(decoration.range(from, to));
     atomic.push(decoration.range(from, to));
@@ -756,7 +758,7 @@ function build(state: EditorState): Built {
 const visualField = StateField.define<Built>({
   create: build,
   update(value, transaction) {
-    if (!transaction.docChanged && !transaction.selection) return value;
+    if (!transaction.docChanged && !transaction.selection && !transaction.effects.some((effect) => effect.is(setChanges))) return value;
     return build(transaction.state);
   },
   provide: (field) => [

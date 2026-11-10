@@ -7,6 +7,7 @@ import type { TexDocument } from "../core/document.ts";
 import { bold, code, createEditor, flashRanges, insertList, insertMath, italic, setHeading, setProblems, type Editor, type Language, type Mode } from "./editor.ts";
 import { MarkdownPreview, mdBold, mdCode, mdHeading, mdItalic, mdList, mdMath } from "./markdown.ts";
 import { ChatPanel } from "./chat.ts";
+import { ChangeHighlight } from "./changes.ts";
 import { FileTree } from "./files.ts";
 import { drawFirstPage, PdfViewer, type PdfPoint, type PdfSelection } from "./pdf.ts";
 import { lineForPdfText } from "./pdf-sync.ts";
@@ -307,8 +308,13 @@ export function startView(host: HostBridge<TexDocument>) {
     setLayout(layout === "editor" ? "split" : "editor");
   }
 
+  /** The change highlight; the file tree marks the files it finds changed. */
+  const changes = new ChangeHighlight({ project: host.project ?? null, report: showBanner, onFiles: (paths) => fileTree?.markChanged(paths) });
+
   toolbar.append(
     editTools,
+    element("span", { className: "sep" }),
+    changes.element,
     element("span", { className: "grow" }),
     lastChange,
     buildBadge,
@@ -960,6 +966,7 @@ export function startView(host: HostBridge<TexDocument>) {
         showEngine();
         wantCompile();
         wantMarkdown();
+        changes.changed();
       },
       onCompile: compileNow,
       onTogglePreview: togglePreview,
@@ -975,6 +982,7 @@ export function startView(host: HostBridge<TexDocument>) {
       if (editor && author?.kind !== "you") flashRanges(editor.view, ranges);
     };
     sync.onSettled = tryCompile;
+    changes.attach(editor.view, shownFile, state.document.text);
     editor.view.scrollDOM.addEventListener("scroll", wantFollow, { passive: true });
     setMode(mode);
     retag();

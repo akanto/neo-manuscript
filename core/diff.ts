@@ -65,3 +65,46 @@ export function wordDiff(before: string, after: string): DiffPart[] {
   }
   return parts;
 }
+
+/**
+ * Where `after` has words that `before` doesn't: the ranges of `after` that were added or changed. Whitespace doesn't
+ * count, so reflowing a paragraph or changing indentation marks nothing, and removed words leave no mark.
+ */
+export function changedRanges(before: string, after: string): { from: number; to: number }[] {
+  if (before === after) return [];
+  // Each distinct word is one character, and every run of whitespace is the same one, so that a character diff of the
+  // two is a diff of their words that doesn't see whitespace.
+  const codes = new Map<string, string>();
+  const space = String.fromCodePoint(0xe000);
+  const tokensOf = (text: string) => text.match(TOKENS) ?? [];
+  const encode = (tokens: string[]) =>
+    tokens
+      .map((token) => {
+        if (/^\s/u.test(token)) return space;
+        let code = codes.get(token);
+        if (code === undefined) {
+          code = String.fromCodePoint(0xe001 + codes.size);
+          codes.set(token, code);
+        }
+        return code;
+      })
+      .join("");
+  const tokens = tokensOf(after);
+  const ranges: { from: number; to: number }[] = [];
+  let index = 0;
+  let offset = 0;
+  for (const [kind, code] of fastDiff(encode(tokensOf(before)), encode(tokens))) {
+    if (kind === fastDiff.DELETE) continue;
+    for (const char of code) {
+      const token = tokens[index++]!;
+      if (kind === fastDiff.INSERT && char !== space) {
+        const last = ranges.at(-1);
+        // Words added one after another, with only whitespace between them, make one range.
+        if (last && /^\s*$/u.test(after.slice(last.to, offset))) last.to = offset + token.length;
+        else ranges.push({ from: offset, to: offset + token.length });
+      }
+      offset += token.length;
+    }
+  }
+  return ranges;
+}

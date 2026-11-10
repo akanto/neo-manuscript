@@ -406,6 +406,22 @@ for (const setup of setups) describe.skipIf(!setup.run)(`the view ${setup.name}`
     await expect(root.locator(".cm-v-title").textContent()).resolves.toEndWith("Example");
   }, 30_000);
 
+  test("Changes marks the words changed since the file was opened, and its file in the list, until it is off", async () => {
+    await root.locator(".changes-toggle").click();
+    await expect(root.locator(".changes-menu").inputValue()).resolves.toBe("");
+    // Earlier tests typed this, and the agent made the title "A Bigger Example".
+    await root.locator(".cm-changed", { hasText: "Typed by the user" }).first().waitFor({ timeout: 5000 });
+    await expect(root.locator(".cm-content").evaluate((content) => [...content.querySelectorAll(".cm-changed")].some((mark) => mark.textContent?.includes("links five constants")))).resolves.toBe(false);
+    await root.locator('.file-row[data-path="paper.tex"] .changed-dot').waitFor({ timeout: 5000 });
+    await root.locator(".cm-line", { hasText: "links five constants" }).click();
+    await page.keyboard.press("End");
+    await page.keyboard.type(" Freshly", { delay: 15 });
+    await root.locator(".cm-changed", { hasText: "Freshly" }).first().waitFor({ timeout: 5000 });
+    await root.locator(".changes-toggle").click();
+    await expect(root.locator(".cm-changed").count()).resolves.toBe(0);
+    await expect(root.locator(".changed-dot").count()).resolves.toBe(0);
+  }, 20_000);
+
   test("nothing threw", () => {
     expect(errors).toEqual([]);
   });

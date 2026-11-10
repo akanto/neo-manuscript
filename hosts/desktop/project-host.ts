@@ -1,15 +1,22 @@
 import { watch, type FSWatcher } from "node:fs";
 import { mkdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import { compile } from "../../core/compile.ts";
 import { NEW_DOCUMENT, parseDocument, type TexDocument } from "../../core/document.ts";
-import type { Author, DocumentState, TaskState } from "../../core/host-api.ts";
+import { changedSince, fileAt, gitDir, gitRefs } from "../../core/git.ts";
+import type { Author, DocumentState, GitRefs, TaskState } from "../../core/host-api.ts";
 import { listProject } from "../../core/project-files.ts";
 import { firstFileOf, isHidden, isProjectPath, isTextFile, kindOf, type ProjectEntry, type ProjectState } from "../../core/project.ts";
 import { DocumentHost } from "./document-host.ts";
 
 /** How long the folder has to stay still after a change before the project is listed again. */
 const SETTLE_MS = 150;
+
+/** How long the git folder has to stay still before the git listeners are told. */
+const GIT_SETTLE_MS = 300;
+
+/** Whether a path in a git folder is one that moves HEAD or the tags. */
+const isGitRefPath = (path: string) => /^(HEAD|packed-refs|refs(\/|$))/.test(path);
 
 export interface ProjectOptions {
   /** The main file the user chose before, if any. */
@@ -46,6 +53,13 @@ export class ProjectHost {
   private watcher: FSWatcher | null = null;
   private listTimer: ReturnType<typeof setTimeout> | null = null;
   private stopListening: (() => void) | null = null;
+  private gitListeners = new Set<() => void>();
+  private gitWatcher: FSWatcher | null = null;
+  private gitTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The repository's git folder when it is inside the project folder, as a path from it; the watcher then sees it. */
+  private innerGitDir: string | null = null;
+  private closed = false;
+  private gitWatching: Promise<void> | null = null;
   /** Called when what the project remembers changes. */
   onMemory: (memory: ProjectMemory) => void = () => {};
   /** Who a change made to a file outside the app is by, when the app knows: the agent, while it has its turn. */
@@ -235,6 +249,10 @@ export class ProjectHost {
     const changed = new Set<string>();
     this.watcher = watch(this.folder, { recursive: true }, (_event, name) => {
       const path = name?.toString().split(/[\\/]/).join("/") ?? null;
+      if (path && this.innerGitDir !== null && path.startsWith(`${this.innerGitDir}/`)) {
+        if (isGitRefPath(path.slice(this.innerGitDir.length + 1))) this.gitChanged();
+        return;
+      }
       if (path && path.split("/").some(isHidden)) return;
       if (path) changed.add(path);
       if (this.listTimer) clearTimeout(this.listTimer);
@@ -246,6 +264,56 @@ export class ProjectHost {
         void this.list();
       }, SETTLE_MS);
     });
+  }
+
+  // --- Git -------------------------------------------------------------------------------------------------------------
+
+  gitRefs(): Promise<GitRefs | null> {
+    return gitRefs(this.folder);
+  }
+
+  fileAt(ref: string, path: string): Promise<string | null> {
+    return fileAt(this.folder, ref, path);
+  }
+
+  /** The files that differ from a ref on disk, once the open documents are written to it. */
+  async changedSince(ref: string): Promise<string[]> {
+    await Promise.all([...this.documents.values()].map((document) => document.written()));
+    return changedSince(this.folder, ref);
+  }
+
+  /** Called (after a short wait) when HEAD or the tags may have moved. */
+  onGitChange(listener: () => void): () => void {
+    this.gitListeners.add(listener);
+    // Git runs only once something asks about it, as when the change highlight is turned on.
+    this.gitWatching ??= this.watchGit();
+    return () => this.gitListeners.delete(listener);
+  }
+
+  private gitChanged() {
+    if (this.gitTimer) clearTimeout(this.gitTimer);
+    this.gitTimer = setTimeout(() => {
+      this.gitTimer = null;
+      for (const listener of this.gitListeners) listener();
+    }, GIT_SETTLE_MS);
+  }
+
+  /** Finds the repository's git folder and watches it for moves of HEAD and the tags; nothing happens without one. */
+  private async watchGit() {
+    try {
+      const dir = await gitDir(this.folder);
+      if (!dir || this.closed) return;
+      const inside = dir.startsWith(this.folder + sep);
+      if (inside) {
+        this.innerGitDir = dir.slice(this.folder.length + 1).split(sep).join("/");
+        return;
+      }
+      this.gitWatcher = watch(dir, { recursive: true }, (_event, name) => {
+        if (name && isGitRefPath(name.toString().split(/[\\/]/).join("/"))) this.gitChanged();
+      });
+    } catch {
+      // Without a git folder to watch, the change highlight just doesn't follow commits.
+    }
   }
 
   // --- Building -------------------------------------------------------------------------------------------------------
@@ -302,7 +370,11 @@ export class ProjectHost {
   }
 
   close() {
+    this.closed = true;
     this.watcher?.close();
+    this.gitWatcher?.close();
+    if (this.gitTimer) clearTimeout(this.gitTimer);
+    this.gitListeners.clear();
     if (this.listTimer) clearTimeout(this.listTimer);
     this.abort?.abort();
     this.stopListening?.();

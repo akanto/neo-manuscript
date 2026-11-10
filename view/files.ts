@@ -51,6 +51,8 @@ export class FileTree {
   /** The file shown that isn't a text file (an image, a PDF), which the editor doesn't have open. */
   private previewed: string | null = null;
   private menu: HTMLElement | null = null;
+  /** The files the change highlight finds changed; null while it is off. */
+  private changed: Set<string> | null = null;
 
   constructor(private options: FileTreeOptions) {
     this.expanded = new Set(JSON.parse(options.storage?.getItem("expanded") ?? "[]") as string[]);
@@ -84,6 +86,14 @@ export class FileTree {
   /** Marks a file shown in the preview, in place of the editor's. */
   showPreviewed(path: string | null) {
     this.previewed = path;
+    this.render();
+  }
+
+  /** Marks the files that changed, and the folders that hold them; null takes the marks away. */
+  markChanged(paths: Set<string> | null) {
+    const same = paths === this.changed || (paths && this.changed && paths.size === this.changed.size && [...paths].every((path) => this.changed!.has(path)));
+    if (same) return;
+    this.changed = paths;
     this.render();
   }
 
@@ -147,6 +157,13 @@ export class FileTree {
     text.textContent = label;
     row.title = path;
     row.append(text);
+    const changed = this.changed && (kind === "file" ? this.changed.has(path) : [...this.changed].some((other) => other.startsWith(`${path}/`)));
+    if (changed) {
+      const dot = document.createElement("span");
+      dot.className = "changed-dot";
+      dot.title = kind === "file" ? "Changed" : "Holds changed files";
+      row.append(dot);
+    }
     row.addEventListener("contextmenu", (event) => this.showMenu(event, { path, kind }));
     return row;
   }

@@ -15,6 +15,7 @@ import {
   type DecorationSet,
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
+import { changeMarks } from "./changes.ts";
 import type { Problem } from "../core/build.ts";
 import { scan, type Token } from "./scan.ts";
 import { synonyms, type SynonymOptions } from "./synonyms.ts";
@@ -258,6 +259,7 @@ export function createEditor(options: EditorOptions): Editor {
         markdown ? markdownLanguage() : [StreamLanguage.define(stex), syntaxHighlighting(highlight)],
         problemField,
         flashField,
+        changeMarks(),
         options.synonyms ? synonyms(options.synonyms) : [],
         options.assist ? assist({ ...options.assist, language: markdown ? "markdown" : "latex" }) : [],
         keymap.of([

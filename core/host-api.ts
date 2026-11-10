@@ -120,4 +120,23 @@ export interface ProjectBridge {
   setMain?(path: string): Promise<void>;
   /** Puts files dropped on the view into a folder of the project ("" for its top). */
   upload?(folder: string, files: File[]): Promise<void>;
+  /**
+   * The git refs the project's files can be compared with, for the change highlight; null when the project's folder
+   * isn't in a git repository. A host without these four lets the view compare with the text as it was when opened.
+   */
+  gitRefs?(): Promise<GitRefs | null>;
+  /** A text file of the project as it is at a ref (HEAD, a tag or a commit); null when it doesn't exist there. */
+  fileAt?(ref: string, path: string): Promise<string | null>;
+  /** The project's files that differ from a ref on disk: changed, added, and untracked but not ignored. */
+  changedSince?(ref: string): Promise<string[]>;
+  /** Called when HEAD or the tags may have moved: a commit, a checkout, a new tag. */
+  onGitChange?(listener: () => void): () => void;
+}
+
+/** A repository's HEAD and tags, as the change highlight offers them. */
+export interface GitRefs {
+  /** The commit HEAD names (its SHA); null in a repository with no commits yet. */
+  head: string | null;
+  /** Newest first. `date` is the tag's (or its commit's) date, ISO 8601. */
+  tags: { name: string; commit: string; date: string }[];
 }

@@ -1,6 +1,6 @@
 import type { TexDocument } from "../../core/document.ts";
 import type { ChatEvent, PastChat } from "../../core/chat.ts";
-import type { ChatBridge, DocumentState, HostBridge, ProjectBridge, ProjectState } from "../../core/host-api.ts";
+import type { ChatBridge, DocumentState, GitRefs, HostBridge, ProjectBridge, ProjectState } from "../../core/host-api.ts";
 import { startView } from "../../view/main.ts";
 import type { PageConfig } from "./pages.ts";
 
@@ -54,7 +54,32 @@ function projectBridge(events: EventSource): ProjectBridge {
     for (const listener of listeners) listener(latest);
   });
   const act = (action: string, body: { path: string; to?: string }) => sent(post(`/project/${action}`, body));
+  const gitListeners = new Set<() => void>();
+  events.addEventListener("git", () => {
+    for (const listener of gitListeners) listener();
+  });
+  const get = (path: string) => fetch(path, { headers: { "x-token": token } });
   return {
+    async gitRefs() {
+      const answer = await get("/git/refs");
+      if (!answer.ok) throw new Error((await answer.text()) || `The app answered ${answer.status}`);
+      return (await answer.json()) as GitRefs | null;
+    },
+    async fileAt(ref, path) {
+      const answer = await get(`/git/file?ref=${encodeURIComponent(ref)}&path=${encodeURIComponent(path)}`);
+      if (answer.status === 404) return null;
+      if (!answer.ok) throw new Error((await answer.text()) || `The app answered ${answer.status}`);
+      return answer.text();
+    },
+    async changedSince(ref) {
+      const answer = await get(`/git/changed?ref=${encodeURIComponent(ref)}`);
+      if (!answer.ok) throw new Error((await answer.text()) || `The app answered ${answer.status}`);
+      return (await answer.json()) as string[];
+    },
+    onGitChange(listener) {
+      gitListeners.add(listener);
+      return () => gitListeners.delete(listener);
+    },
     onProject(listener) {
       listeners.add(listener);
       if (latest) listener(latest);

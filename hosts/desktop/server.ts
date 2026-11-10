@@ -76,7 +76,7 @@ export function startServer({ port = 0, viewCode, storage, chooseProject, agents
       start(controller) {
         const send = (event: string, data: unknown) => controller.enqueue(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
         pages.add(send);
-        const unsubscribe = [project?.onState((state) => send("state", state)), project?.onProject((state) => send("project", state))];
+        const unsubscribe = [project?.onState((state) => send("state", state)), project?.onProject((state) => send("project", state)), project?.onGitChange(() => send("git", null))];
         if (project) {
           send("project", project.projectState());
           send("state", project.state());
@@ -109,6 +109,9 @@ export function startServer({ port = 0, viewCode, storage, chooseProject, agents
       return new Response((error as Error).message, { status: 400 });
     }
   };
+
+  /** Gives an `attempt`'s JSON text back as JSON, and leaves an error as it is. */
+  const jsonOr = (response: Response) => (response.ok ? new Response(response.body, { headers: { "content-type": "application/json", "cache-control": "no-store" } }) : response);
 
   const server = Bun.serve({
     port,
@@ -164,6 +167,16 @@ export function startServer({ port = 0, viewCode, storage, chooseProject, agents
         }
         return (await file.exists()) ? new Response(file, { headers: { "cache-control": "no-store" } }) : new Response("missing", { status: 404 });
       }
+      if (url.pathname === "/git/refs") return attempt(async () => JSON.stringify(await open.gitRefs())).then(jsonOr);
+      if (url.pathname === "/git/file") {
+        try {
+          const text = await open.fileAt(url.searchParams.get("ref") ?? "", url.searchParams.get("path") ?? "");
+          return text === null ? new Response("missing", { status: 404 }) : new Response(text, { headers: { "cache-control": "no-store" } });
+        } catch (error) {
+          return new Response((error as Error).message, { status: 400 });
+        }
+      }
+      if (url.pathname === "/git/changed") return attempt(async () => JSON.stringify(await open.changedSince(url.searchParams.get("ref") ?? ""))).then(jsonOr);
       if (url.pathname === "/agent/compile" && post) {
         // For the agent, by curl: the build's summary, or what went wrong, as text.
         try {

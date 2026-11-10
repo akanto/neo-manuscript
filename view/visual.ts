@@ -3,6 +3,7 @@ import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemir
 import katex from "katex";
 import { SECTION_LEVELS } from "../core/latex.ts";
 import { macrosOf, scan, type Span, type Token } from "./scan.ts";
+import { blockWidget, setChanges } from "./changes.ts";
 
 /**
  * Visual mode: the same text as Source mode, drawn as the document would look. Markup is hidden or replaced by what it
@@ -336,6 +337,7 @@ function build(state: EditorState, { tokens, macros }: Scanned): Built {
   const atomic: Range<Decoration>[] = [];
   const hide = (from: number, to: number, widget?: WidgetType, block = false) => {
     if (from >= to && !widget) return;
+    if (widget && block) widget = blockWidget(state, from, to, widget);
     const decoration = Decoration.replace(widget ? { widget, block } : {});
     decorations.push(decoration.range(from, to));
     atomic.push(decoration.range(from, to));
@@ -579,7 +581,7 @@ const visualField = StateField.define<{ scanned: Scanned; built: Built }>({
   },
   update(value, transaction) {
     const read = transaction.docChanged ? scanned(transaction.state) : value.scanned;
-    if (!transaction.docChanged && !transaction.selection && !transaction.effects.some((effect) => effect.is(redraw))) return value;
+    if (!transaction.docChanged && !transaction.selection && !transaction.effects.some((effect) => effect.is(redraw) || effect.is(setChanges))) return value;
     return { scanned: read, built: build(transaction.state, read) };
   },
   provide: (field) => [
