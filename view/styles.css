@@ -297,6 +297,9 @@ button:disabled { opacity: 0.5; cursor: default; }
 .cm-v-newline { color: var(--faint); font-size: 0.75em; }
 .cm-v-logo { font-family: var(--serif); }
 .cm-v-math { cursor: pointer; }
+/* Inline math is one box: KaTeX's .katex is a relatively positioned inline, and when a wrapped line split it, WebKit
+   sometimes painted it on another line than the one it took room on. No text-indent, which a list item would pass in. */
+.cm-v-math:not(.cm-v-math-display) { display: inline-block; text-indent: 0; }
 .cm-v-math-display { display: block; text-align: center; padding: 0.3em 0; }
 .cm-v-math-preview { opacity: 0.8; border-top: 1px dashed var(--line); margin: 0 28px; cursor: default; }
 .cm-v-math-source, .cm-v-math-source * { font-family: var(--mono); font-size: 0.85em; color: var(--math) !important; }
