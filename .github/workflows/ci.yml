@@ -19,9 +19,9 @@ jobs:
   test:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.4
 
@@ -34,7 +34,7 @@ jobs:
           sudo /Library/TeX/texbin/tlmgr install latexmk
 
       # The packages Tectonic fetches on its first build.
-      - uses: actions/cache@v5
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ~/Library/Caches/Tectonic
           key: tectonic-${{ runner.os }}-${{ hashFiles('examples/**', 'tests/**', 'e2e/**') }}
@@ -47,10 +47,10 @@ jobs:
       - run: bun test tests
 
       # Mirador's canvas code (MIT), for the e2e tests that frame the view in WebKit as Mirador frames it.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: sodre90/mirador
-          ref: v0.12.0
+          ref: 645d82aba6a719522ba3c2b8579322ff08eceded # v0.12.0
           path: .mirador
           sparse-checkout: shared
       - run: bunx playwright-core install webkit
@@ -63,9 +63,9 @@ jobs:
   app:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.4
 
@@ -73,7 +73,9 @@ jobs:
       - run: bun run app:prepare
       - run: bun run app:build
 
-      - uses: actions/upload-artifact@v6
+      # Not for a fork's pull request, so no DMG built from outside code sits on this repository's Actions page.
+      - if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: NeoManuscript-${{ github.sha }}
           path: artifacts/*.dmg
