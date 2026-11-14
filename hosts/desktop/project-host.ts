@@ -13,7 +13,7 @@ import { DocumentHost } from "./document-host.ts";
 const SETTLE_MS = 150;
 
 /** How long the git folder has to stay still before the git listeners are told. */
-const GIT_SETTLE_MS = 300;
+export const GIT_SETTLE_MS = 300;
 
 /** Whether a path in a git folder is one that moves when HEAD or a tag does: HEAD, the refs, packed or reftable. */
 export const isGitRefPath = (path: string) => /^(HEAD|packed-refs|refs(\/|$)|reftable(\/|$))/.test(path);

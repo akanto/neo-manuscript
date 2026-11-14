@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isGitRefPath, ProjectHost } from "../hosts/desktop/project-host.ts";
+import { GIT_SETTLE_MS, isGitRefPath, ProjectHost } from "../hosts/desktop/project-host.ts";
 
 const hasGit = Bun.which("git") !== null;
 
@@ -41,10 +41,11 @@ describe.skipIf(!hasGit)("ProjectHost git changes", () => {
     try {
       let changes = 0;
       project.onGitChange(() => changes++);
-      // The watchers start after git has been asked, so tag until one is seen.
-      for (let i = 0; i < 40 && changes === 0; i++) {
+      // The watchers start after git has been asked, so tag until one is seen. The listeners hear of a move once the git
+      // folder has been still for GIT_SETTLE_MS, so each tag waits longer than that, or the next would put it off again.
+      for (let i = 0; i < 20 && changes === 0; i++) {
         await run(repo, "tag", `t${i}`);
-        await Bun.sleep(250);
+        await Bun.sleep(GIT_SETTLE_MS + 400);
       }
       expect(changes).toBeGreaterThan(0);
     } finally {
