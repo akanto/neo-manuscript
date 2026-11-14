@@ -1,5 +1,5 @@
 /**
- * Mirador's app plugin API (version 20), as this plugin uses it. Mirador doesn't publish these types, so this is a copy of
+ * Mirador's app plugin API (version 21), as this plugin uses it. Mirador doesn't publish these types, so this is a copy of
  * the parts of its shared/apps.ts that we need. The view's side of it is core/host-api.ts.
  */
 import type { Author, Change, GitRefs, HostBridge } from "../../core/host-api.ts";
@@ -35,7 +35,7 @@ export interface AppTaskContext<Document = unknown> {
 /**
  * `window.mirador` in an app's view, as plugin API 6 makes it: HostBridge, with `readFile` reaching the whole workspace
  * through "../" from the document's folder, the state naming its `file` in the workspace, and the workspace's files.
- * Plugin API 20 adds the workspace's git refs; a Mirador before it has none of those four methods.
+ * Plugin API 21 adds the workspace's git refs; a Mirador before it has none of those four methods.
  */
 export interface MiradorBridge<Document = unknown> extends HostBridge<Document> {
   readFile(path: string): Promise<Blob>;

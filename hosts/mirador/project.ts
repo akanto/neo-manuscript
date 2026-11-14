@@ -84,7 +84,7 @@ export function miradorBridge<Document>(mirador: MiradorBridge<Document>): Mirad
 }
 
 /**
- * The ProjectBridge's git methods on Mirador's (plugin API 20), for the change highlight to offer HEAD and the tags;
+ * The ProjectBridge's git methods on Mirador's (plugin API 21), for the change highlight to offer HEAD and the tags;
  * none on an older Mirador, where it compares with the text as it was when opened.
  */
 function gitOf(mirador: MiradorBridge<unknown>, readFile: (path: string) => Promise<Blob>): Partial<ProjectBridge> {
