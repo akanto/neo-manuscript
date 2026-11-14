@@ -108,3 +108,37 @@ export function changedRanges(before: string, after: string): { from: number; to
   }
   return ranges;
 }
+
+/** How many files `withChangedWords` reads at once. */
+const READ_BATCH = 8;
+
+/**
+ * Of files a host says differ from a ref, those the change highlight marks: a text file stays only when the editor would
+ * mark words in it, as a moved line break or new indentation marks nothing; other files, as PDFs and pictures, stay
+ * without being read. `before` is a file at the ref (null when it isn't there), `now` the file as it is; a file either
+ * can't read stays.
+ */
+export async function withChangedWords(
+  paths: readonly string[],
+  isText: (path: string) => boolean,
+  before: (path: string) => Promise<string | null>,
+  now: (path: string) => Promise<string>,
+): Promise<string[]> {
+  const differs = async (path: string): Promise<boolean> => {
+    if (!isText(path)) return true;
+    try {
+      // A file new since the ref is read no further.
+      const old = await before(path);
+      return old === null || changedRanges(old, await now(path)).length > 0;
+    } catch {
+      return true;
+    }
+  };
+  const kept: string[] = [];
+  for (let i = 0; i < paths.length; i += READ_BATCH) {
+    const batch = paths.slice(i, i + READ_BATCH);
+    const differing = await Promise.all(batch.map(differs));
+    batch.forEach((path, index) => differing[index] && kept.push(path));
+  }
+  return kept;
+}

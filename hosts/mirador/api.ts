@@ -1,8 +1,8 @@
 /**
- * Mirador's app plugin API (version 4), as this plugin uses it. Mirador doesn't publish these types, so this is a copy of
+ * Mirador's app plugin API (version 20), as this plugin uses it. Mirador doesn't publish these types, so this is a copy of
  * the parts of its shared/apps.ts that we need. The view's side of it is core/host-api.ts.
  */
-import type { Author, Change, HostBridge } from "../../core/host-api.ts";
+import type { Author, Change, GitRefs, HostBridge } from "../../core/host-api.ts";
 
 /** What the host module exports. Mirador calls it in its own process and shows what a call throws to whoever made the change. */
 export interface AppHost<Document = unknown> {
@@ -35,6 +35,7 @@ export interface AppTaskContext<Document = unknown> {
 /**
  * `window.mirador` in an app's view, as plugin API 6 makes it: HostBridge, with `readFile` reaching the whole workspace
  * through "../" from the document's folder, the state naming its `file` in the workspace, and the workspace's files.
+ * Plugin API 20 adds the workspace's git refs; a Mirador before it has none of those four methods.
  */
 export interface MiradorBridge<Document = unknown> extends HostBridge<Document> {
   readFile(path: string): Promise<Blob>;
@@ -44,4 +45,12 @@ export interface MiradorBridge<Document = unknown> extends HostBridge<Document> 
   open(file: string): Promise<void>;
   /** Called when the workspace's files may have changed: after a task, an agent's turn, an open. */
   onFiles(listener: () => void): () => void;
+  /** The workspace's HEAD and tags; null when it isn't in a git repository. */
+  gitRefs?(): Promise<GitRefs | null>;
+  /** A file of the workspace, named from it, as it is at a ref (HEAD, a tag or a SHA); null when it isn't there at that ref. */
+  readFileAt?(ref: string, path: string): Promise<Blob | null>;
+  /** The workspace's files, named from it, that differ from a ref: changed, added, and untracked but not ignored. */
+  changedSince?(ref: string): Promise<string[]>;
+  /** Called when HEAD or the tags may have moved, once the view asked for the refs. */
+  onGitChange?(listener: () => void): () => void;
 }

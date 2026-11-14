@@ -276,7 +276,8 @@ export class ChangeHighlight {
     }
     const project = this.options.project;
     if (project?.onGitChange) this.stopListening.push(project.onGitChange(() => void this.gitMoved()));
-    if (project) this.stopListening.push(project.onProject(() => this.wantFiles()));
+    // Outside a repository the refs are read again as the files change: `git init` moves no HEAD a host watches.
+    if (project) this.stopListening.push(project.onProject(() => (this.refs === null && project.gitRefs ? void this.gitMoved({ quiet: true }) : this.wantFiles())));
     await this.readRefs();
     if (!this.on) return;
     await this.refreshFiles();
@@ -284,13 +285,13 @@ export class ChangeHighlight {
   }
 
   /** Reads the host's refs and fills the menu, keeping the chosen one while it is still there. */
-  private async readRefs() {
+  private async readRefs({ quiet = false } = {}) {
     const project = this.options.project;
     let refs: GitRefs | null = null;
     try {
       refs = project?.gitRefs ? await project.gitRefs() : null;
     } catch (error) {
-      this.options.report(`Git can't be read: ${(error as Error).message}`);
+      if (!quiet) this.options.report(`Git can't be read: ${(error as Error).message}`);
     }
     // A repository with no commits has nothing to compare with yet.
     this.refs = refs && refs.head !== null ? refs : null;
@@ -310,11 +311,11 @@ export class ChangeHighlight {
   }
 
   /** HEAD or the tags moved: the menu, the baselines and the file tree's marks are read again. */
-  private async gitMoved() {
+  private async gitMoved({ quiet = false } = {}) {
     if (!this.on) return;
     const before = this.refs;
     const ref = this.ref;
-    await this.readRefs();
+    await this.readRefs({ quiet });
     if (!this.on) return;
     const commitOf = (refs: GitRefs | null, name: string) => (name === HEAD ? refs?.head : refs?.tags.find((tag) => tag.name === name)?.commit) ?? null;
     if (ref !== this.ref || commitOf(before, ref) !== commitOf(this.refs, this.ref)) this.baselines.clear();

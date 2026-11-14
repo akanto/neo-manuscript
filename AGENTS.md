@@ -43,7 +43,7 @@ ln -s "$PWD" ~/.mirador/plugins/neo-manuscript
   loads the view from, with a per-run token; states go back as server-sent events), `view.ts` (the view's bridge to
   it), `project-host.ts` (a folder: files, main file, builds, watching), `document-host.ts` (one open text file),
   `agents.ts` and `chat.ts` (ACP agents), `updates.ts`, `settings.ts`.
-- `hosts/mirador/`: the Mirador plugin (plugin API 6). `host.ts` is the AppHost Mirador runs; `api.ts` copies the parts
+- `hosts/mirador/`: the Mirador plugin (plugin API 20). `host.ts` is the AppHost Mirador runs; `api.ts` copies the parts
   of Mirador's plugin API it uses; `project.ts` gives the view the workspace as its project.
 - `scripts/`: `build.ts` (bundles a view, with KaTeX's fonts and pdf.js's worker inside, since Mirador's frame loads
   nothing from the network), `build-desktop.ts` (desktop view, agent bundles, notices), `thesaurus.ts` (WordNet),
@@ -87,8 +87,9 @@ ln -s "$PWD" ~/.mirador/plugins/neo-manuscript
   changed since a baseline (`changedRanges` in `core/diff.ts`: removed words and whitespace leave no mark), and dots
   the changed files in the file tree. The baseline is the last commit or a tag, for a host with the `ProjectBridge`'s
   git methods (the desktop app, through `core/git.ts` and `/git/*`; it watches the git folder, and a linked worktree's
-  common one, and sends a `git` event when HEAD or the tags move), else the text as the view first opened the file: in Mirador, whose plugin API reads no
-  git yet, and in a folder that isn't a repository.
+  common one, and sends a `git` event when HEAD or the tags move) and for Mirador from plugin API 20 (`gitRefs`,
+  `readFileAt`, `changedSince` and `onGitChange` on `window.mirador`, which `hosts/mirador/project.ts` feature-detects),
+  else the text as the view first opened the file: in an older Mirador, and in a folder that isn't a repository.
 - **Agents (Mirador)**: `app_state`, `apply` (`replace`, `insert`, `replace_lines`, `set_text`) and `app_run compile`.
 - **Mirador's view**: the project is the workspace, and paths are named from it, as the desktop app names them from its
   folder. The view lists it with `listFiles` (again on `onFiles`), opens a file with `open` (after a running build ends,

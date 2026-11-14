@@ -1,5 +1,6 @@
+import { withChangedWords } from "../../core/diff.ts";
 import type { DocumentState, ProjectBridge, ProjectState } from "../../core/host-api.ts";
-import { entriesOf, mainFileFor, type ProjectEntry } from "../../core/project.ts";
+import { entriesOf, isProjectPath, isTextFile, mainFileFor, type ProjectEntry } from "../../core/project.ts";
 import type { MiradorBridge } from "./api.ts";
 
 /**
@@ -75,10 +76,31 @@ export function miradorBridge<Document>(mirador: MiradorBridge<Document>): Mirad
         }
       }
     },
+    ...gitOf(mirador, readFile),
   };
   // Mirador's bridge, as it is, under these: its methods stay on it, as they may need it. It is frozen, so these are
   // defined rather than assigned, which a frozen readFile underneath would refuse.
   return Object.create(mirador, { readFile: { value: readFile }, project: { value: project } }) as MiradorBridge<Document> & { project: ProjectBridge };
+}
+
+/**
+ * The ProjectBridge's git methods on Mirador's (plugin API 20), for the change highlight to offer HEAD and the tags;
+ * none on an older Mirador, where it compares with the text as it was when opened.
+ */
+function gitOf(mirador: MiradorBridge<unknown>, readFile: (path: string) => Promise<Blob>): Partial<ProjectBridge> {
+  const { gitRefs, readFileAt, changedSince, onGitChange } = mirador;
+  if (!gitRefs || !readFileAt || !changedSince || !onGitChange) return {};
+  const fileAt = async (ref: string, path: string) => (await readFileAt.call(mirador, ref, path))?.text() ?? null;
+  return {
+    gitRefs: () => gitRefs.call(mirador),
+    fileAt,
+    // Mirador lists every file git says differs; as in the desktop app, only those the editor would mark words in stay.
+    changedSince: async (ref) => {
+      const listed = (await changedSince.call(mirador, ref)).filter(isProjectPath);
+      return withChangedWords(listed, isTextFile, (path) => fileAt(ref, path), (path) => readFile(path).then((blob) => blob.text()));
+    },
+    onGitChange: (listener) => onGitChange.call(mirador, listener),
+  };
 }
 
 /** How mainFileFor reads the workspace: its listing for what is in a folder, the files themselves for their text. */
