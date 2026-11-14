@@ -121,6 +121,10 @@ function miradorParentPage(canvas: MiradorCanvas, assets: string) {
     const answer = (value) => post({ source: "mirador-canvas", kind: "app-answer", requestId: m.requestId, value });
     const refuse = (message) => post({ source: "mirador-canvas", kind: "app-answer-failed", requestId: m.requestId, message });
     if (m.kind === "app-list-files") fetch("/files").then((r) => r.json()).then(answer);
+    // Mirador 0.14.1's git methods (plugin API 21), answered as Mirador answers them for a workspace that is no
+    // repository, which the harness's temporary folder isn't.
+    if (m.kind === "app-git-refs" || m.kind === "app-git-file") answer(null);
+    if (m.kind === "app-git-changed") answer([]);
     if (m.kind === "app-open") fetch("/open?file=" + encodeURIComponent(m.file), { method: "POST" }).then(async (r) => (r.ok ? answer(null) : refuse(await r.text())));
     if (m.kind === "app-read-file") {
       const response = await fetch("/file?path=" + encodeURIComponent(m.path));
